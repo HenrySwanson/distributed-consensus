@@ -132,15 +132,14 @@ impl Process {
         }
     }
 
-    fn everybody_else(&self) -> impl Iterator<Item = ProcessID> {
-        let own_id = self.id.0;
-        (0..N).filter_map(move |i| {
-            if i != own_id {
-                Some(ProcessID(i))
-            } else {
-                None
-            }
-        })
+    fn msg_everybody(&self, msg: Message) -> Vec<AddressedMessage> {
+        (0..N)
+            .map(|i| AddressedMessage {
+                from: self.id,
+                to: ProcessID(i),
+                msg: msg.clone(),
+            })
+            .collect()
     }
 
     fn value_chosen(&self) -> bool {
@@ -155,13 +154,7 @@ impl Process {
         // Wipe all knowledge of previous proposals
         self.promises_received.clear();
 
-        self.everybody_else()
-            .map(|id| AddressedMessage {
-                from: self.id,
-                to: id,
-                msg: Message::Prepare(n),
-            })
-            .collect()
+        self.msg_everybody(Message::Prepare(n))
     }
 
     fn recv_message(&mut self, msg: AddressedMessage) -> Vec<AddressedMessage> {
@@ -209,13 +202,7 @@ impl Process {
                         });
 
                     // now send that message out to a quorum
-                    self.everybody_else()
-                        .map(|id| AddressedMessage {
-                            from: self.id,
-                            to: id,
-                            msg: Message::Accept(n, value.clone()),
-                        })
-                        .collect()
+                    self.msg_everybody(Message::Accept(n, value))
                 } else {
                     // no quorum yet
                     vec![]
@@ -228,13 +215,7 @@ impl Process {
                 if self.latest_promised.is_none_or(|old| proposal_id >= old) {
                     // accept it!
                     self.latest_accepted = Some((proposal_id, value.clone()));
-                    self.everybody_else()
-                        .map(|id| AddressedMessage {
-                            from: self.id,
-                            to: id,
-                            msg: Message::Accepted(proposal_id, value.clone()),
-                        })
-                        .collect()
+                    self.msg_everybody(Message::Accepted(proposal_id, value))
                 } else {
                     // ignore (or NAK)
                     vec![]
