@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 use std::collections::VecDeque;
+use std::fmt::Display;
 
+use itertools::Itertools;
 use rand::seq::IteratorRandom;
 use rand::Rng;
 
@@ -72,7 +74,7 @@ fn main() {
 
         // Print current status
         for p in &processes {
-            println!("{}: {}", p.id.0, p.status());
+            println!("{}", p.status());
         }
         println!("====================");
     }
@@ -204,9 +206,7 @@ impl Process {
                         .values()
                         .flatten()
                         .max_by_key(|(proposal, _)| proposal)
-                        .map_or(format!("rand({:?}, {})", self.id, n), |(_, value)| {
-                            value.clone()
-                        });
+                        .map_or(format!("V{}.{}", n, self.id), |(_, value)| value.clone());
 
                     // now send that message out to a quorum
                     self.msg_everybody(Message::Accept(n, value))
@@ -250,8 +250,38 @@ impl Process {
         }
     }
 
+    // TODO: column-based? idk
     fn status(&self) -> String {
-        format!("{:?}", self)
+        format!(
+            "Process #{}: P {{ {}, [{}] }}, A {{ {}, {} }}, L {{ {}, {} }}",
+            self.id,
+            // proposer
+            display_or_none(&self.current_proposal_id),
+            self.promises_received
+                .iter()
+                .map(|(id, last_accepted)| format!("{} {}", id, display_or_none2(last_accepted),))
+                .format(", "),
+            // acceptor
+            display_or_none(&self.latest_promised),
+            display_or_none2(&self.latest_accepted),
+            // learner
+            format_args!("hashmap of size {}", self.acceptances_received.len()),
+            display_or_none(&self.decided_value)
+        )
+    }
+}
+
+fn display_or_none<T: Display>(t: &Option<T>) -> String {
+    match t {
+        Some(t) => t.to_string(),
+        None => String::from("None"),
+    }
+}
+
+fn display_or_none2<T: Display, U: Display>(t: &Option<(T, U)>) -> String {
+    match t {
+        Some((t, u)) => format!("({t}, {u})"),
+        None => String::from("None"),
     }
 }
 
@@ -288,5 +318,17 @@ impl Network {
         if self.in_flight.len() >= 2 {
             self.in_flight.swap(0, 1);
         }
+    }
+}
+
+impl Display for ProcessID {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+impl Display for ProposalID {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "P{}.{}", self.0, self.1)
     }
 }
