@@ -7,23 +7,34 @@ use rand::Rng;
 const F: usize = 2;
 const N: usize = 2 * F + 1;
 
-const MAX_ROUNDS: usize = 1000;
+const MAX_ROUNDS: usize = 10000;
+const LOSS_PROBABILITY: f64 = 0.1;
+const DELAY_PROBABILITY: f64 = 0.2;
 
 fn main() {
     println!("Hello, world!");
 
     let mut processes: Vec<_> = (0..N).map(|i| Process::new(ProcessID(i))).collect();
     // TODO: introduce message delay, loss, duplication, reordering, etc
-    let mut network = VecDeque::<AddressedMessage>::new();
+    let mut network = Network::new();
     let mut rng = rand::rng();
 
     for round_number in 0..MAX_ROUNDS {
-        if processes.iter().all(|p| p.value_chosen()) {
-            break;
-        }
-
         println!("==== ROUND {:04} ====", round_number);
         println!("{} messages pending...", network.len());
+
+        // With low probability, drop a message
+        if !network.is_empty() && rng.random_bool(LOSS_PROBABILITY) {
+            let msg = network.next_msg();
+            if let Some(msg) = msg {
+                println!("Dropping message {:?}", msg);
+            }
+        }
+        // With slightly higher probability, delay a message
+        if network.len() >= 2 && rng.random_bool(DELAY_PROBABILITY) {
+            network.delay();
+            println!("Delaying a message");
+        }
 
         // If there's nothing in the queue, or with some probability, take a random process
         // and cause it to issue a proposal. Processes that have decided a value are exempt.
@@ -44,7 +55,7 @@ fn main() {
                 }
             }
         } else {
-            let msg = network.pop_front().unwrap();
+            let msg = network.next_msg().unwrap();
             println!(
                 "Applying a message: {} -> {}: {:?}",
                 msg.from.0, msg.to.0, msg.msg
@@ -57,7 +68,7 @@ fn main() {
             println!("  {} to {}: {:?}", msg.from.0, msg.to.0, msg.msg);
         }
 
-        network.extend(msgs);
+        network.enqueue(msgs);
 
         // Print current status
         for p in &processes {
@@ -140,10 +151,6 @@ impl Process {
                 msg: msg.clone(),
             })
             .collect()
-    }
-
-    fn value_chosen(&self) -> bool {
-        false
     }
 
     fn create_proposal_messages(&mut self) -> Vec<AddressedMessage> {
@@ -245,5 +252,41 @@ impl Process {
 
     fn status(&self) -> String {
         format!("{:?}", self)
+    }
+}
+
+#[derive(Debug)]
+struct Network {
+    in_flight: VecDeque<AddressedMessage>,
+}
+
+impl Network {
+    fn new() -> Self {
+        Self {
+            in_flight: VecDeque::new(),
+        }
+    }
+
+    fn enqueue(&mut self, msgs: Vec<AddressedMessage>) {
+        self.in_flight.extend(msgs);
+    }
+
+    fn next_msg(&mut self) -> Option<AddressedMessage> {
+        self.in_flight.pop_front()
+    }
+
+    fn is_empty(&self) -> bool {
+        self.in_flight.is_empty()
+    }
+
+    fn len(&self) -> usize {
+        self.in_flight.len()
+    }
+
+    /// swaps the first and second elements in the queue
+    fn delay(&mut self) {
+        if self.in_flight.len() >= 2 {
+            self.in_flight.swap(0, 1);
+        }
     }
 }
