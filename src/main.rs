@@ -12,6 +12,7 @@ const N: usize = 2 * F + 1;
 const MAX_ROUNDS: usize = 10000;
 const LOSS_PROBABILITY: f64 = 0.1;
 const DELAY_PROBABILITY: f64 = 0.2;
+const ENABLE_NACKS: bool = true;
 
 fn main() {
     println!("Hello, world!");
@@ -93,6 +94,7 @@ struct Process {
     // proposer
     current_proposal_id: Option<usize>,
     promises_received: HashMap<ProcessID, Option<(ProposalID, String)>>,
+    superseded_by: Option<ProposalID>,
     // acceptor
     latest_promised: Option<ProposalID>,
     latest_accepted: Option<(ProposalID, String)>,
@@ -117,6 +119,7 @@ enum Message {
     Promise(usize, Option<(ProposalID, String)>),
     Accept(usize, String),
     Accepted(ProposalID, String), // is value needed?
+    Nack(ProposalID),
 }
 
 impl Process {
@@ -125,6 +128,7 @@ impl Process {
             id,
             current_proposal_id: None,
             promises_received: HashMap::new(),
+            superseded_by: None,
             latest_promised: None,
             latest_accepted: None,
             acceptances_received: HashMap::new(),
@@ -143,12 +147,16 @@ impl Process {
     }
 
     fn create_proposal_messages(&mut self) -> Vec<AddressedMessage> {
-        // Increment and fetch
-        let n = self.current_proposal_id.map_or(0, |x| x + 1);
+        // Send something higher than:
+        // - our previous proposal
+        // - anything we've ever seen from a Nack
+        let latest = std::cmp::max(self.current_proposal_id, self.superseded_by.map(|p| p.0));
+        let n = latest.map_or(0, |x| x + 1);
         self.current_proposal_id = Some(n);
 
         // Wipe all knowledge of previous proposals
         self.promises_received.clear();
+        self.superseded_by = None;
 
         self.msg_everybody(Message::Prepare(n))
     }
@@ -157,24 +165,33 @@ impl Process {
         match msg.msg {
             Message::Prepare(n) => {
                 let proposal = ProposalID(n, msg.from);
-                if self.latest_promised.is_none_or(|old| proposal > old) {
+                let reply = if self.latest_promised.is_none_or(|old| proposal > old) {
                     // make a promise, but do not accept a value (you haven't gotten one
                     // for this proposal yet!)
                     self.latest_promised = Some(proposal);
-                    vec![AddressedMessage {
-                        from: self.id,
-                        to: msg.from,
-                        msg: Message::Promise(n, self.latest_accepted.clone()),
-                    }]
+                    Message::Promise(n, self.latest_accepted.clone())
                 } else {
-                    // ignore it if we have already made a later promis than this one
-                    // TODO: impl NAK
-                    vec![]
-                }
+                    // NACK it if we have already made a later promise than this one
+                    if ENABLE_NACKS {
+                        Message::Nack(self.latest_promised.unwrap())
+                    } else {
+                        return vec![];
+                    }
+                };
+                vec![AddressedMessage {
+                    from: self.id,
+                    to: msg.from,
+                    msg: reply,
+                }]
             }
             Message::Promise(n, latest_accepted) => {
                 if Some(n) != self.current_proposal_id {
                     // ignore this, it's from some other older proposal of ours
+                    return vec![];
+                }
+
+                // if our current proposal got NACKed, ignore this promise
+                if self.superseded_by.is_some() {
                     return vec![];
                 }
 
@@ -201,6 +218,25 @@ impl Process {
                     // no quorum yet
                     vec![]
                 }
+            }
+            // We're a Proposer, but we've been told by one of the Acceptors we're talking
+            // to that they have already promised to a higher proposal.
+            Message::Nack(proposal) => {
+                // we got a NACK, which should indicate that we abort the proposal
+                // we're doing. but it could be stale, so ignore it if so
+                let current_proposal = ProposalID(
+                    self.current_proposal_id
+                        .expect("got nack before sending any proposal"),
+                    self.id,
+                );
+
+                assert_ne!(proposal, current_proposal);
+                if proposal > current_proposal {
+                    self.superseded_by = Some(proposal);
+                }
+
+                // in all cases, don't respond
+                vec![]
             }
             // We're an Acceptor and we got an Accept message! We should accept it unless
             // we've made a higher-numbered Promise.
@@ -240,7 +276,7 @@ impl Process {
     // TODO: column-based? idk
     fn status(&self) -> String {
         format!(
-            "Process #{}: P {{ {}, [{}] }}, A {{ {}, {} }}, L {{ {}, {} }}",
+            "Process #{}: P {{ {}, [{}], superseded by: {} }}, A {{ {}, {} }}, L {{ {}, {} }}",
             self.id,
             // proposer
             display_or_none(&self.current_proposal_id),
@@ -248,6 +284,7 @@ impl Process {
                 .iter()
                 .map(|(id, last_accepted)| format!("{} {}", id, display_or_none2(last_accepted),))
                 .format(", "),
+            display_or_none(&self.superseded_by),
             // acceptor
             display_or_none(&self.latest_promised),
             display_or_none2(&self.latest_accepted),
