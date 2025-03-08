@@ -27,20 +27,16 @@ fn main() {
 
         // With low probability, drop a message
         if !network.is_empty() && rng.random_bool(LOSS_PROBABILITY) {
-            let msg = network.next_msg();
-            if let Some(msg) = msg {
-                println!("Dropping message {:?}", msg);
-            }
+            network.drop();
         }
         // With slightly higher probability, delay a message
         if network.len() >= 2 && rng.random_bool(DELAY_PROBABILITY) {
             network.delay();
-            println!("Delaying a message");
         }
 
         // If there's nothing in the queue, or with some probability, take a random process
         // and cause it to issue a proposal. Processes that have decided a value are exempt.
-        let msgs = if network.is_empty() || rng.random_bool(0.05) {
+        if network.is_empty() || rng.random_bool(0.05) {
             let random_undecided_process = processes
                 .iter_mut()
                 .filter(|p| p.decided_value.is_none())
@@ -49,7 +45,8 @@ fn main() {
             match random_undecided_process {
                 Some(p) => {
                     println!("Random proposal from {}!", p.id.0);
-                    p.create_proposal_messages()
+                    let proposal_msgs = p.create_proposal_messages();
+                    network.enqueue(proposal_msgs);
                 }
                 None => {
                     println!("Everyone has decided on a value!");
@@ -58,19 +55,9 @@ fn main() {
             }
         } else {
             let msg = network.next_msg().unwrap();
-            println!(
-                "Applying a message: {} -> {}: {:?}",
-                msg.from.0, msg.to.0, msg.msg
-            );
-            processes[msg.to.0].recv_message(msg)
+            let replies = processes[msg.to.0].recv_message(msg);
+            network.enqueue(replies);
         };
-
-        println!("Sending {} messages:", msgs.len());
-        for msg in &msgs {
-            println!("  {} to {}: {:?}", msg.from.0, msg.to.0, msg.msg);
-        }
-
-        network.enqueue(msgs);
 
         // Print current status
         for p in &processes {
@@ -298,11 +285,20 @@ impl Network {
     }
 
     fn enqueue(&mut self, msgs: Vec<AddressedMessage>) {
+        println!("Sending {} messages:", msgs.len());
+        for msg in &msgs {
+            println!("  {} to {}: {:?}", msg.from.0, msg.to.0, msg.msg);
+        }
         self.in_flight.extend(msgs);
     }
 
     fn next_msg(&mut self) -> Option<AddressedMessage> {
-        self.in_flight.pop_front()
+        let msg = self.in_flight.pop_front()?;
+        println!(
+            "Received a message:  {} -> {}: {:?}",
+            msg.from.0, msg.to.0, msg.msg
+        );
+        Some(msg)
     }
 
     fn is_empty(&self) -> bool {
@@ -316,7 +312,15 @@ impl Network {
     /// swaps the first and second elements in the queue
     fn delay(&mut self) {
         if self.in_flight.len() >= 2 {
+            println!("Delaying message: {:?}", self.in_flight[0]);
             self.in_flight.swap(0, 1);
+        }
+    }
+
+    /// drops the first message
+    fn drop(&mut self) {
+        if let Some(msg) = self.in_flight.pop_front() {
+            println!("Dropping message {:?}", msg);
         }
     }
 }
