@@ -14,9 +14,9 @@ const N: usize = 2 * F + 1;
 
 const MAX_TICKS: u64 = 10000;
 const LOSS_PROBABILITY: f64 = 0.1;
-const DELAY_PROBABILITY: f64 = 0.2;
 const ENABLE_NACKS: bool = true;
-const NETWORK_DELAY: u64 = 3;
+const MIN_NETWORK_DELAY: u64 = 3;
+const MAX_NETWORK_DELAY: u64 = 10;
 const PROPOSAL_PROBABILITY: f64 = 0.05;
 const PROPOSAL_COOLDOWN: u64 = 10;
 
@@ -55,11 +55,18 @@ struct ProcessID(usize);
 
 impl Simulation {
     fn new() -> Self {
+        let mut rng = StdRng::from_os_rng();
         Self {
             clock: 0,
             processes: std::array::from_fn(|id| Process::new(ProcessID(id))),
-            network: Network::new(),
-            rng: StdRng::from_os_rng(),
+            network: Network::new(
+                // TODO: okay to use StdRng for parent and child?
+                StdRng::from_rng(&mut rng),
+                LOSS_PROBABILITY,
+                MIN_NETWORK_DELAY,
+                MAX_NETWORK_DELAY,
+            ),
+            rng,
         }
     }
 
@@ -75,14 +82,6 @@ impl Simulation {
                 break;
             }
 
-            // With low probability, drop a message
-            if !self.network.is_empty() && self.rng.random_bool(LOSS_PROBABILITY) {
-                self.network.drop();
-            }
-            // With slightly higher probability, delay a message
-            if self.network.len() >= 2 && self.rng.random_bool(DELAY_PROBABILITY) {
-                self.network.delay();
-            }
             // For each eligible process, check if it timed out and issued a new proposal
             for p in &mut self.processes {
                 if p.decided_value().is_none()

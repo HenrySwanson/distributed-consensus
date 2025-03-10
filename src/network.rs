@@ -1,13 +1,19 @@
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
 
+use rand::distr::{Distribution, Uniform};
+use rand::rngs::StdRng;
+use rand::Rng;
+
 use crate::paxos::Message;
 use crate::ProcessID;
-use crate::NETWORK_DELAY;
 
 #[derive(Debug)]
 pub struct Network {
     in_flight: BinaryHeap<Reverse<Packet>>,
+    rng: StdRng,
+    loss_probability: f64,
+    delay_distribution: Uniform<u64>,
 }
 
 // TODO: generic over message?
@@ -45,9 +51,13 @@ impl Ord for Packet {
 }
 
 impl Network {
-    pub fn new() -> Self {
+    pub fn new(rng: StdRng, loss_probability: f64, min_delay: u64, max_delay: u64) -> Self {
+        assert!(min_delay <= max_delay);
         Self {
             in_flight: BinaryHeap::new(),
+            rng,
+            loss_probability,
+            delay_distribution: Uniform::new_inclusive(min_delay, max_delay).unwrap(),
         }
     }
 
@@ -57,11 +67,19 @@ impl Network {
             println!("  {} to {}: {:?}", msg.from.0, msg.to.0, msg.msg);
         }
 
-        let arrival_time = current_tick + NETWORK_DELAY;
-        self.in_flight.extend(
-            msgs.into_iter()
-                .map(|msg| Reverse(Packet { arrival_time, msg })),
-        );
+        self.in_flight.extend(msgs.into_iter().filter_map(|msg| {
+            // Q: do this at pop time or enqueue time?
+            if self.rng.random_bool(self.loss_probability) {
+                println!("Dropping message {:?}", msg.msg);
+                return None;
+            }
+
+            let delay = self.delay_distribution.sample(&mut self.rng);
+            Some(Reverse(Packet {
+                arrival_time: current_tick + delay,
+                msg,
+            }))
+        }));
     }
 
     pub fn next_msg(&mut self, current_tick: u64) -> Option<AddressedMessage> {
@@ -83,22 +101,5 @@ impl Network {
 
     pub fn len(&self) -> usize {
         self.in_flight.len()
-    }
-
-    /// delays the upcoming message
-    /// todo: implement this as part of arrival time
-    pub fn delay(&mut self) {
-        let Some(mut top) = self.in_flight.peek_mut() else {
-            return;
-        };
-        println!("Delaying message {:?}", top.0.msg);
-        top.0.arrival_time += 2;
-    }
-
-    /// drops the first message
-    pub fn drop(&mut self) {
-        if let Some(Reverse(msg)) = self.in_flight.pop() {
-            println!("Dropping message {:?}", msg.msg);
-        }
     }
 }
