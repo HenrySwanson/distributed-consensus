@@ -18,6 +18,8 @@ const LOSS_PROBABILITY: f64 = 0.1;
 const DELAY_PROBABILITY: f64 = 0.2;
 const ENABLE_NACKS: bool = true;
 const NETWORK_DELAY: u64 = 3;
+const PROPOSAL_PROBABILITY: f64 = 0.05;
+const PROPOSAL_COOLDOWN: u64 = 10;
 
 // TODO:
 // - Some kind of log that isn't stdout
@@ -59,6 +61,7 @@ struct Process {
     current_proposal_id: Option<usize>,
     promises_received: HashMap<ProcessID, Option<(ProposalID, String)>>,
     superseded_by: Option<ProposalID>,
+    min_next_proposal_time: u64,
     // acceptor
     latest_promised: Option<ProposalID>,
     latest_accepted: Option<(ProposalID, String)>,
@@ -102,6 +105,12 @@ impl Simulation {
             println!("==== TICK {:04} ====", self.clock);
             println!("{} messages pending...", self.network.len());
 
+            // Are we done?
+            if self.processes.iter().all(|p| p.decided_value.is_some()) {
+                println!("Everyone has decided on a value!");
+                break;
+            }
+
             // With low probability, drop a message
             if !self.network.is_empty() && self.rng.random_bool(LOSS_PROBABILITY) {
                 self.network.drop();
@@ -110,31 +119,21 @@ impl Simulation {
             if self.network.len() >= 2 && self.rng.random_bool(DELAY_PROBABILITY) {
                 self.network.delay();
             }
-            // With some probability, take a random process and cause it to issue a proposal.
-            // Processes that have decided a value are exempt.
-            if self.rng.random_bool(0.05) {
-                let random_undecided_process = self
-                    .processes
-                    .iter_mut()
-                    .filter(|p| p.decided_value.is_none())
-                    .choose(&mut self.rng);
-
-                match random_undecided_process {
-                    Some(p) => {
-                        println!("Random proposal from {}!", p.id.0);
-                        let proposal_msgs = p.create_proposal_messages();
-                        self.network.enqueue(self.clock, proposal_msgs);
-                    }
-                    None => {
-                        println!("Everyone has decided on a value!");
-                        break;
-                    }
+            // For each eligible process, check if it timed out and issued a new proposal
+            for p in &mut self.processes {
+                if p.decided_value.is_none()
+                    && p.min_next_proposal_time <= self.clock
+                    && self.rng.random_bool(PROPOSAL_PROBABILITY)
+                {
+                    println!("Random proposal from {}!", p.id.0);
+                    let proposal_msgs = p.create_proposal_messages(self.clock);
+                    self.network.enqueue(self.clock, proposal_msgs);
                 }
             }
 
             // Get the next packet and act on it
             if let Some(msg) = self.network.next_msg(self.clock) {
-                let replies = self.processes[msg.to.0].recv_message(msg);
+                let replies = self.processes[msg.to.0].recv_message(msg, self.clock);
                 self.network.enqueue(self.clock, replies);
             };
 
@@ -163,37 +162,6 @@ impl Simulation {
             println!("FAILURE!");
         }
     }
-
-    fn step(&mut self) {
-        let Some(msg) = self.network.next_msg(self.clock) else {
-            return;
-        };
-        let replies = self.processes[msg.to.0].recv_message(msg);
-        self.network.enqueue(self.clock, replies);
-    }
-
-    fn trigger_proposal(&mut self) {
-        let random_undecided_process = self
-            .processes
-            .iter_mut()
-            .filter(|p| p.decided_value.is_none())
-            .choose(&mut self.rng);
-
-        match random_undecided_process {
-            Some(p) => {
-                println!("Random proposal from {}!", p.id.0);
-                let proposal_msgs = p.create_proposal_messages();
-                self.network.enqueue(self.clock, proposal_msgs);
-            }
-            None => {
-                println!("Everyone has decided on a value!");
-            }
-        }
-    }
-
-    fn network(&mut self) -> &mut Network {
-        &mut self.network
-    }
 }
 
 impl Process {
@@ -203,6 +171,7 @@ impl Process {
             current_proposal_id: None,
             promises_received: HashMap::new(),
             superseded_by: None,
+            min_next_proposal_time: 0,
             latest_promised: None,
             latest_accepted: None,
             acceptances_received: HashMap::new(),
@@ -220,7 +189,7 @@ impl Process {
             .collect()
     }
 
-    fn create_proposal_messages(&mut self) -> Vec<AddressedMessage> {
+    fn create_proposal_messages(&mut self, current_tick: u64) -> Vec<AddressedMessage> {
         // Send something higher than:
         // - our previous proposal
         // - anything we've ever seen from a Nack
@@ -232,10 +201,15 @@ impl Process {
         self.promises_received.clear();
         self.superseded_by = None;
 
+        // Set the proposal cooldown timer
+        self.min_next_proposal_time = current_tick + PROPOSAL_COOLDOWN;
+
         self.msg_everybody(Message::Prepare(n))
     }
 
-    fn recv_message(&mut self, msg: AddressedMessage) -> Vec<AddressedMessage> {
+    fn recv_message(&mut self, msg: AddressedMessage, current_tick: u64) -> Vec<AddressedMessage> {
+        // there's network activity, cool down the proposal timer
+        self.min_next_proposal_time = current_tick + PROPOSAL_COOLDOWN;
         match msg.msg {
             Message::Prepare(n) => {
                 let proposal = ProposalID(n, msg.from);
