@@ -1,3 +1,5 @@
+use std::cmp::Reverse;
+use std::collections::BinaryHeap;
 use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::fmt::Display;
@@ -11,10 +13,11 @@ use rand::SeedableRng;
 const F: usize = 2;
 const N: usize = 2 * F + 1;
 
-const MAX_ROUNDS: usize = 10000;
+const MAX_TICKS: u64 = 10000;
 const LOSS_PROBABILITY: f64 = 0.1;
 const DELAY_PROBABILITY: f64 = 0.2;
 const ENABLE_NACKS: bool = true;
+const NETWORK_DELAY: u64 = 3;
 
 // TODO:
 // - Some kind of log that isn't stdout
@@ -40,6 +43,7 @@ fn main() {
 }
 
 struct Simulation {
+    clock: u64,
     processes: [Process; N],
     network: Network,
     rng: StdRng,
@@ -63,7 +67,7 @@ struct Process {
     decided_value: Option<String>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct AddressedMessage {
     from: ProcessID,
     to: ProcessID,
@@ -85,6 +89,7 @@ enum Message {
 impl Simulation {
     fn new() -> Self {
         Self {
+            clock: 0,
             processes: std::array::from_fn(|id| Process::new(ProcessID(id))),
             network: Network::new(),
             rng: StdRng::from_os_rng(),
@@ -92,8 +97,9 @@ impl Simulation {
     }
 
     fn run(&mut self) {
-        for round_number in 0..MAX_ROUNDS {
-            println!("==== ROUND {:04} ====", round_number);
+        for _ in 0..MAX_TICKS {
+            self.clock += 1;
+            println!("==== TICK {:04} ====", self.clock);
             println!("{} messages pending...", self.network.len());
 
             // With low probability, drop a message
@@ -104,10 +110,9 @@ impl Simulation {
             if self.network.len() >= 2 && self.rng.random_bool(DELAY_PROBABILITY) {
                 self.network.delay();
             }
-
-            // If there's nothing in the queue, or with some probability, take a random process
-            // and cause it to issue a proposal. Processes that have decided a value are exempt.
-            if self.network.is_empty() || self.rng.random_bool(0.05) {
+            // With some probability, take a random process and cause it to issue a proposal.
+            // Processes that have decided a value are exempt.
+            if self.rng.random_bool(0.05) {
                 let random_undecided_process = self
                     .processes
                     .iter_mut()
@@ -118,17 +123,19 @@ impl Simulation {
                     Some(p) => {
                         println!("Random proposal from {}!", p.id.0);
                         let proposal_msgs = p.create_proposal_messages();
-                        self.network.enqueue(proposal_msgs);
+                        self.network.enqueue(self.clock, proposal_msgs);
                     }
                     None => {
                         println!("Everyone has decided on a value!");
                         break;
                     }
                 }
-            } else {
-                let msg = self.network.next_msg().unwrap();
+            }
+
+            // Get the next packet and act on it
+            if let Some(msg) = self.network.next_msg(self.clock) {
                 let replies = self.processes[msg.to.0].recv_message(msg);
-                self.network.enqueue(replies);
+                self.network.enqueue(self.clock, replies);
             };
 
             // Print current status
@@ -158,11 +165,11 @@ impl Simulation {
     }
 
     fn step(&mut self) {
-        let Some(msg) = self.network.next_msg() else {
+        let Some(msg) = self.network.next_msg(self.clock) else {
             return;
         };
         let replies = self.processes[msg.to.0].recv_message(msg);
-        self.network.enqueue(replies);
+        self.network.enqueue(self.clock, replies);
     }
 
     fn trigger_proposal(&mut self) {
@@ -176,7 +183,7 @@ impl Simulation {
             Some(p) => {
                 println!("Random proposal from {}!", p.id.0);
                 let proposal_msgs = p.create_proposal_messages();
-                self.network.enqueue(proposal_msgs);
+                self.network.enqueue(self.clock, proposal_msgs);
             }
             None => {
                 println!("Everyone has decided on a value!");
@@ -297,7 +304,6 @@ impl Process {
                     self.id,
                 );
 
-                assert_ne!(proposal, current_proposal);
                 if proposal > current_proposal {
                     self.superseded_by = Some(proposal);
                 }
@@ -378,31 +384,66 @@ fn display_or_none2<T: Display, U: Display>(t: &Option<(T, U)>) -> String {
 
 #[derive(Debug)]
 struct Network {
-    in_flight: VecDeque<AddressedMessage>,
+    in_flight: BinaryHeap<Reverse<Packet>>,
+}
+
+#[derive(Debug, Clone)]
+struct Packet {
+    arrival_time: u64,
+    msg: AddressedMessage,
+}
+
+impl PartialEq for Packet {
+    fn eq(&self, other: &Self) -> bool {
+        self.arrival_time == other.arrival_time
+    }
+}
+
+impl Eq for Packet {}
+
+impl PartialOrd for Packet {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for Packet {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.arrival_time.cmp(&other.arrival_time)
+    }
 }
 
 impl Network {
     fn new() -> Self {
         Self {
-            in_flight: VecDeque::new(),
+            in_flight: BinaryHeap::new(),
         }
     }
 
-    fn enqueue(&mut self, msgs: Vec<AddressedMessage>) {
+    fn enqueue(&mut self, current_tick: u64, msgs: Vec<AddressedMessage>) {
         println!("Sending {} messages:", msgs.len());
         for msg in &msgs {
             println!("  {} to {}: {:?}", msg.from.0, msg.to.0, msg.msg);
         }
-        self.in_flight.extend(msgs);
+
+        let arrival_time = current_tick + NETWORK_DELAY;
+        self.in_flight.extend(
+            msgs.into_iter()
+                .map(|msg| Reverse(Packet { arrival_time, msg })),
+        );
     }
 
-    fn next_msg(&mut self) -> Option<AddressedMessage> {
-        let msg = self.in_flight.pop_front()?;
-        println!(
-            "Received a message:  {} -> {}: {:?}",
-            msg.from.0, msg.to.0, msg.msg
-        );
-        Some(msg)
+    fn next_msg(&mut self, current_tick: u64) -> Option<AddressedMessage> {
+        if let Some(Reverse(packet)) = self.in_flight.peek() {
+            if packet.arrival_time <= current_tick {
+                println!(
+                    "Received a message:  {} -> {}: {:?}",
+                    packet.msg.from.0, packet.msg.to.0, packet.msg.msg
+                );
+                return self.in_flight.pop().map(|x| x.0.msg);
+            }
+        }
+        None
     }
 
     fn is_empty(&self) -> bool {
@@ -413,18 +454,20 @@ impl Network {
         self.in_flight.len()
     }
 
-    /// swaps the first and second elements in the queue
+    /// delays the upcoming message
+    /// todo: implement this as part of arrival time
     fn delay(&mut self) {
-        if self.in_flight.len() >= 2 {
-            println!("Delaying message: {:?}", self.in_flight[0]);
-            self.in_flight.swap(0, 1);
-        }
+        let Some(mut top) = self.in_flight.peek_mut() else {
+            return;
+        };
+        println!("Delaying message {:?}", top.0.msg);
+        top.0.arrival_time += 2;
     }
 
     /// drops the first message
     fn drop(&mut self) {
-        if let Some(msg) = self.in_flight.pop_front() {
-            println!("Dropping message {:?}", msg);
+        if let Some(Reverse(msg)) = self.in_flight.pop() {
+            println!("Dropping message {:?}", msg.msg);
         }
     }
 }
