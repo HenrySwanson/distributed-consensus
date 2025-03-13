@@ -2,6 +2,8 @@ use std::collections::HashMap;
 use std::fmt::Display;
 
 use itertools::Itertools;
+use rand::rngs::StdRng;
+use rand::Rng;
 
 use crate::simulation::AddressedMessage;
 use crate::simulation::ProcessID;
@@ -10,6 +12,7 @@ use crate::N;
 
 const ENABLE_NACKS: bool = true;
 const PROPOSAL_COOLDOWN: u64 = 10;
+const PROPOSAL_PROBABILITY: f64 = 0.05;
 
 #[derive(Debug)]
 pub struct Process {
@@ -54,6 +57,32 @@ impl Process {
         }
     }
 
+    pub fn tick(
+        &mut self,
+        current_tick: u64,
+        messages: Vec<AddressedMessage>,
+        rng: &mut StdRng,
+    ) -> Vec<AddressedMessage> {
+        let mut replies = vec![];
+
+        // First check the timer and maybe fire a proposal message
+        if self.decided_value.is_none()
+            && self.min_next_proposal_time <= current_tick
+            && rng.random_bool(PROPOSAL_PROBABILITY)
+        {
+            println!("Random proposal from {}!", self.id.0);
+            let proposal_msgs = self.create_proposal_messages(current_tick);
+            replies.extend(proposal_msgs);
+        }
+
+        // Then process all messages received
+        for msg in messages {
+            replies.extend(self.recv_message(msg, current_tick))
+        }
+
+        replies
+    }
+
     fn msg_everybody(&self, msg: Message) -> Vec<AddressedMessage> {
         (0..N)
             .map(|i| AddressedMessage {
@@ -64,7 +93,7 @@ impl Process {
             .collect()
     }
 
-    pub fn create_proposal_messages(&mut self, current_tick: u64) -> Vec<AddressedMessage> {
+    fn create_proposal_messages(&mut self, current_tick: u64) -> Vec<AddressedMessage> {
         // Send something higher than:
         // - our previous proposal
         // - anything we've ever seen from a Nack
@@ -82,11 +111,7 @@ impl Process {
         self.msg_everybody(Message::Prepare(n))
     }
 
-    pub fn recv_message(
-        &mut self,
-        msg: AddressedMessage,
-        current_tick: u64,
-    ) -> Vec<AddressedMessage> {
+    fn recv_message(&mut self, msg: AddressedMessage, current_tick: u64) -> Vec<AddressedMessage> {
         // there's network activity, cool down the proposal timer
         self.min_next_proposal_time = current_tick + PROPOSAL_COOLDOWN;
         match msg.msg {
@@ -218,11 +243,6 @@ impl Process {
             format_args!("hashmap of size {}", self.acceptances_received.len()),
             display_or_none(&self.decided_value)
         )
-    }
-
-    /// At this tick, we should simulate a timeout event
-    pub fn next_timeout_at(&self) -> u64 {
-        self.min_next_proposal_time
     }
 
     pub fn decided_value(&self) -> Option<&String> {

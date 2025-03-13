@@ -1,5 +1,4 @@
 use rand::rngs::StdRng;
-use rand::Rng;
 use rand::SeedableRng;
 
 use self::network::Network;
@@ -12,9 +11,6 @@ const MAX_TICKS: u64 = 10000;
 const LOSS_PROBABILITY: f64 = 0.1;
 const MIN_NETWORK_DELAY: u64 = 3;
 const MAX_NETWORK_DELAY: u64 = 10;
-
-// TODO: move to paxos
-const PROPOSAL_PROBABILITY: f64 = 0.05;
 
 pub use network::AddressedMessage;
 
@@ -57,23 +53,17 @@ impl Simulation {
                 break;
             }
 
-            // For each eligible process, check if it timed out and issued a new proposal
-            for p in &mut self.processes {
-                if p.decided_value().is_none()
-                    && p.next_timeout_at() <= self.clock
-                    && self.rng.random_bool(PROPOSAL_PROBABILITY)
-                {
-                    println!("Random proposal from {}!", p.id.0);
-                    let proposal_msgs = p.create_proposal_messages(self.clock);
-                    self.network.enqueue(self.clock, proposal_msgs);
-                }
+            // Fetch messages
+            let mut msgs_to_deliver: [_; N] = std::array::from_fn(|_| vec![]);
+            while let Some(msg) = self.network.next_msg(self.clock) {
+                msgs_to_deliver[msg.to.0].push(msg);
             }
 
-            // Get the next packet and act on it
-            if let Some(msg) = self.network.next_msg(self.clock) {
-                let replies = self.processes[msg.to.0].recv_message(msg, self.clock);
+            // Tick each process
+            for (p, messages) in self.processes.iter_mut().zip(msgs_to_deliver) {
+                let replies = p.tick(self.clock, messages, &mut self.rng);
                 self.network.enqueue(self.clock, replies);
-            };
+            }
 
             // Print current status
             for p in &self.processes {
