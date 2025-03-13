@@ -1,16 +1,20 @@
 use rand::rngs::StdRng;
+use rand::Rng;
 use rand::SeedableRng;
 
 use self::network::Network;
 use crate::paxos::Process;
+use crate::F;
 use crate::N;
 
 mod network;
 
 const MAX_TICKS: u64 = 10000;
-const LOSS_PROBABILITY: f64 = 0.1;
+const LOSS_PROBABILITY: f64 = 0.0;
 const MIN_NETWORK_DELAY: u64 = 3;
 const MAX_NETWORK_DELAY: u64 = 10;
+const CRASH_PROBABILITY: f64 = 0.2;
+const UNCRASH_PROBABILITY: f64 = 0.2;
 
 pub use network::AddressedMessage;
 
@@ -42,6 +46,8 @@ impl Simulation {
     }
 
     pub fn run(&mut self) {
+        let mut is_down: [_; N] = std::array::from_fn(|_| false);
+
         for _ in 0..MAX_TICKS {
             self.clock += 1;
             println!("==== TICK {:04} ====", self.clock);
@@ -53,6 +59,22 @@ impl Simulation {
                 break;
             }
 
+            // Randomly crash and uncrash
+            for idx in 0..N {
+                let down = is_down[idx];
+                // never bring down more than a quorum!
+                if !down && self.rng.random_bool(CRASH_PROBABILITY) {
+                    if is_down.iter().filter(|x| **x).count() < F {
+                        println!("Process {} is crashing!", idx);
+                        self.processes[idx].crash();
+                        is_down[idx] = true;
+                    }
+                } else if down && self.rng.random_bool(UNCRASH_PROBABILITY) {
+                    println!("Process {} is back up!", idx);
+                    is_down[idx] = false;
+                }
+            }
+
             // Fetch messages
             let mut msgs_to_deliver: [_; N] = std::array::from_fn(|_| vec![]);
             while let Some(msg) = self.network.next_msg(self.clock) {
@@ -60,8 +82,8 @@ impl Simulation {
             }
 
             // Tick each process
-            for (p, messages) in self.processes.iter_mut().zip(msgs_to_deliver) {
-                let replies = p.tick(self.clock, messages, &mut self.rng);
+            for (idx, messages) in msgs_to_deliver.into_iter().enumerate() {
+                let replies = self.processes[idx].tick(self.clock, messages, &mut self.rng);
                 self.network.enqueue(self.clock, replies);
             }
 

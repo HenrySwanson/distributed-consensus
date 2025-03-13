@@ -83,6 +83,13 @@ impl Process {
         replies
     }
 
+    pub fn crash(&mut self) {
+        // replace self with a fresh process, only carrying over a little info
+        let old = std::mem::replace(self, Self::new(self.id));
+        self.latest_promised = old.latest_promised;
+        self.latest_accepted = old.latest_accepted;
+    }
+
     fn msg_everybody(&self, msg: Message) -> Vec<AddressedMessage> {
         (0..N)
             .map(|i| AddressedMessage {
@@ -176,14 +183,14 @@ impl Process {
             Message::Nack(proposal) => {
                 // we got a NACK, which should indicate that we abort the proposal
                 // we're doing. but it could be stale, so ignore it if so
-                let current_proposal = ProposalID(
-                    self.current_proposal_id
-                        .expect("got nack before sending any proposal"),
-                    self.id,
-                );
-
-                if proposal > current_proposal {
-                    self.superseded_by = Some(proposal);
+                if let Some(n) = self.current_proposal_id {
+                    let current_proposal = ProposalID(n, self.id);
+                    if proposal > current_proposal {
+                        self.superseded_by = Some(proposal);
+                    }
+                } else {
+                    // uncommon, but it can happen if we've crashed and forgotten
+                    // our own proposals. do nothing in this case
                 }
 
                 // in all cases, don't respond
