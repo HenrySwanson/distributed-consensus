@@ -1,12 +1,13 @@
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
 
-use rand::distr::{Distribution, Uniform};
+use rand::distr::Distribution;
+use rand::distr::Uniform;
 use rand::rngs::StdRng;
 use rand::Rng;
 
+use super::ProcessID;
 use crate::paxos::Message;
-use crate::ProcessID;
 
 #[derive(Debug)]
 pub struct Network {

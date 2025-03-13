@@ -3,12 +3,13 @@ use std::fmt::Display;
 
 use itertools::Itertools;
 
-use crate::network::AddressedMessage;
-use crate::ProcessID;
-use crate::ENABLE_NACKS;
+use crate::simulation::AddressedMessage;
+use crate::simulation::ProcessID;
 use crate::F;
 use crate::N;
-use crate::PROPOSAL_COOLDOWN;
+
+const ENABLE_NACKS: bool = true;
+const PROPOSAL_COOLDOWN: u64 = 10;
 
 #[derive(Debug)]
 pub struct Process {
