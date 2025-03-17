@@ -4,8 +4,9 @@ use std::fmt::Display;
 use itertools::Itertools;
 use rand::Rng;
 
-use crate::simulation::AddressedMessage;
 use crate::simulation::Context;
+use crate::simulation::Incoming;
+use crate::simulation::Outgoing;
 use crate::simulation::ProcessID;
 use crate::F;
 use crate::N;
@@ -82,17 +83,16 @@ impl Process {
         self.latest_accepted = old.latest_accepted;
     }
 
-    fn msg_everybody(&self, msg: Message) -> Vec<AddressedMessage> {
+    fn msg_everybody(&self, msg: Message) -> Vec<Outgoing<Message>> {
         (0..N)
-            .map(|i| AddressedMessage {
-                from: self.id,
+            .map(|i| Outgoing {
                 to: ProcessID(i),
                 msg: msg.clone(),
             })
             .collect()
     }
 
-    fn create_proposal_messages(&mut self, current_tick: u64) -> Vec<AddressedMessage> {
+    fn create_proposal_messages(&mut self, current_tick: u64) -> Vec<Outgoing<Message>> {
         // Send something higher than:
         // - our previous proposal
         // - anything we've ever seen from a Nack
@@ -110,7 +110,11 @@ impl Process {
         self.msg_everybody(Message::Prepare(n))
     }
 
-    fn recv_message(&mut self, msg: AddressedMessage, current_tick: u64) -> Vec<AddressedMessage> {
+    fn recv_message(
+        &mut self,
+        msg: Incoming<Message>,
+        current_tick: u64,
+    ) -> Vec<Outgoing<Message>> {
         // there's network activity, cool down the proposal timer
         self.min_next_proposal_time = current_tick + PROPOSAL_COOLDOWN;
         match msg.msg {
@@ -129,8 +133,7 @@ impl Process {
                         return vec![];
                     }
                 };
-                vec![AddressedMessage {
-                    from: self.id,
+                vec![Outgoing {
                     to: msg.from,
                     msg: reply,
                 }]

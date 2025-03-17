@@ -3,6 +3,7 @@ use rand::Rng;
 use rand::SeedableRng;
 
 use self::network::Network;
+use crate::paxos::Message;
 use crate::paxos::Process;
 use crate::F;
 use crate::N;
@@ -16,12 +17,13 @@ const MAX_NETWORK_DELAY: u64 = 10;
 const CRASH_PROBABILITY: f64 = 0.05;
 const UNCRASH_PROBABILITY: f64 = 0.2;
 
-pub use network::AddressedMessage;
+pub use network::Incoming;
+pub use network::Outgoing;
 
 pub struct Simulation {
     clock: u64,
     processes: [Process; N],
-    network: Network,
+    network: Network<Message>,
     rng: StdRng,
 }
 
@@ -32,8 +34,8 @@ pub struct Context<'sim> {
     pub current_tick: u64,
     pub rng: &'sim mut StdRng,
     // TODO: parcel these two into a single network object?
-    pub received_messages: Vec<AddressedMessage>,
-    pub outgoing_messages: &'sim mut Vec<AddressedMessage>,
+    pub received_messages: Vec<Incoming<Message>>,
+    pub outgoing_messages: &'sim mut Vec<Outgoing<Message>>,
 }
 
 impl Simulation {
@@ -85,8 +87,8 @@ impl Simulation {
 
             // Fetch messages
             let mut msgs_to_deliver: [_; N] = std::array::from_fn(|_| vec![]);
-            while let Some(msg) = self.network.next_msg(self.clock) {
-                msgs_to_deliver[msg.to.0].push(msg);
+            while let Some((msg, to)) = self.network.next_msg(self.clock) {
+                msgs_to_deliver[to.0].push(msg);
             }
 
             // Tick each process
@@ -98,7 +100,7 @@ impl Simulation {
                     received_messages: messages,
                     outgoing_messages: &mut replies,
                 });
-                self.network.enqueue(self.clock, replies);
+                self.network.enqueue(self.clock, ProcessID(idx), replies);
             }
 
             // Print current status

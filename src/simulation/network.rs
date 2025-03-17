@@ -7,51 +7,56 @@ use rand::rngs::StdRng;
 use rand::Rng;
 
 use super::ProcessID;
-use crate::paxos::Message;
 
 #[derive(Debug)]
-pub struct Network {
-    in_flight: BinaryHeap<Reverse<Packet>>,
+pub struct Network<M> {
+    in_flight: BinaryHeap<Reverse<Packet<M>>>,
     rng: StdRng,
     loss_probability: f64,
     delay_distribution: Uniform<u64>,
 }
 
-// TODO: generic over message?
 #[derive(Debug, Clone)]
-pub struct AddressedMessage {
+pub struct Incoming<M> {
     pub from: ProcessID,
-    pub to: ProcessID,
-    pub msg: Message,
+    pub msg: M,
 }
 
 #[derive(Debug, Clone)]
-struct Packet {
-    arrival_time: u64,
-    msg: AddressedMessage,
+pub struct Outgoing<M> {
+    pub to: ProcessID,
+    pub msg: M,
 }
 
-impl PartialEq for Packet {
+#[derive(Debug, Clone)]
+struct Packet<M> {
+    arrival_time: u64,
+    msg: M,
+    from: ProcessID,
+    to: ProcessID,
+}
+
+impl<M> PartialEq for Packet<M> {
     fn eq(&self, other: &Self) -> bool {
         self.arrival_time == other.arrival_time
     }
 }
 
-impl Eq for Packet {}
+impl<M> Eq for Packet<M> {}
 
-impl PartialOrd for Packet {
+impl<M> PartialOrd for Packet<M> {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl Ord for Packet {
+impl<M> Ord for Packet<M> {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         self.arrival_time.cmp(&other.arrival_time)
     }
 }
 
-impl Network {
+impl<M> Network<M> {
     pub fn new(rng: StdRng, loss_probability: f64, min_delay: u64, max_delay: u64) -> Self {
         assert!(min_delay <= max_delay);
         Self {
@@ -62,35 +67,47 @@ impl Network {
         }
     }
 
-    pub fn enqueue(&mut self, current_tick: u64, msgs: Vec<AddressedMessage>) {
+    pub fn enqueue(&mut self, current_tick: u64, from: ProcessID, msgs: Vec<Outgoing<M>>)
+    where
+        M: std::fmt::Debug,
+    {
         println!("Sending {} messages:", msgs.len());
         for msg in &msgs {
-            println!("  {} to {}: {:?}", msg.from.0, msg.to.0, msg.msg);
+            println!("  {} to {}: {:?}", from, msg.to, msg.msg);
         }
 
-        self.in_flight.extend(msgs.into_iter().filter_map(|msg| {
-            // Q: do this at pop time or enqueue time?
-            if self.rng.random_bool(self.loss_probability) {
-                println!("Dropping message {:?}", msg.msg);
-                return None;
-            }
+        self.in_flight
+            .extend(msgs.into_iter().filter_map(|out_msg| {
+                // Q: do this at pop time or enqueue time?
+                if self.rng.random_bool(self.loss_probability) {
+                    println!("Dropping message {:?}", out_msg.msg);
+                    return None;
+                }
 
-            let delay = self.delay_distribution.sample(&mut self.rng);
-            Some(Reverse(Packet {
-                arrival_time: current_tick + delay,
-                msg,
-            }))
-        }));
+                let delay = self.delay_distribution.sample(&mut self.rng);
+                Some(Reverse(Packet {
+                    arrival_time: current_tick + delay,
+                    msg: out_msg.msg,
+                    from,
+                    to: out_msg.to,
+                }))
+            }));
     }
 
-    pub fn next_msg(&mut self, current_tick: u64) -> Option<AddressedMessage> {
+    pub fn next_msg(&mut self, current_tick: u64) -> Option<(Incoming<M>, ProcessID)>
+    where
+        M: std::fmt::Debug,
+    {
         if let Some(Reverse(packet)) = self.in_flight.peek() {
             if packet.arrival_time <= current_tick {
                 println!(
                     "Received a message:  {} -> {}: {:?}",
-                    packet.msg.from.0, packet.msg.to.0, packet.msg.msg
+                    packet.from, packet.to, packet.msg
                 );
-                return self.in_flight.pop().map(|x| x.0.msg);
+                return self.in_flight.pop().map(|x| {
+                    let Packet { msg, from, to, .. } = x.0;
+                    (Incoming { msg, from }, to)
+                });
             }
         }
         None
