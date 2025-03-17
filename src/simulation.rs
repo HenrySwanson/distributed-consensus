@@ -11,7 +11,7 @@ use crate::N;
 mod network;
 
 const MAX_TICKS: u64 = 10000;
-const LOSS_PROBABILITY: f64 = 0.0;
+const LOSS_PROBABILITY: f64 = 0.05;
 const MIN_NETWORK_DELAY: u64 = 3;
 const MAX_NETWORK_DELAY: u64 = 10;
 const CRASH_PROBABILITY: f64 = 0.05;

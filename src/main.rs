@@ -32,6 +32,9 @@ struct Args {
     /// but pretty noisy.
     #[arg(short, long)]
     verbose: bool,
+    /// Runs repeatedly until failure
+    #[arg(long)]
+    stress: bool,
 }
 
 fn main() {
@@ -48,12 +51,26 @@ fn main() {
         .init()
         .unwrap();
 
-    let seed = args.seed.unwrap_or_else(rand::random);
-    let mut sim = simulation::Simulation::from_seed(seed);
-    let success = sim.run();
+    if args.stress {
+        for n in 0..u64::MAX {
+            let seed = rand::random();
+            let mut sim = simulation::Simulation::from_seed(seed);
+            let success = sim.run();
+            if success {
+                log::info!("Simulation {n} succeeded for seed {seed}")
+            } else {
+                log::error!("Simulation {n} did not succeed for seed {seed}");
+                break;
+            }
+        }
+    } else {
+        let seed = args.seed.unwrap_or_else(rand::random);
+        let mut sim = simulation::Simulation::from_seed(seed);
+        let success = sim.run();
 
-    log::info!("Seed was: {seed}");
-    if !success {
-        log::error!("Simulation did not succeed!");
+        log::info!("Seed was: {seed}");
+        if !success {
+            log::error!("Simulation did not succeed!");
+        }
     }
 }
