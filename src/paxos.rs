@@ -64,7 +64,7 @@ impl Process {
             && self.min_next_proposal_time <= ctx.current_tick
             && ctx.rng.random_bool(PROPOSAL_PROBABILITY)
         {
-            println!("Random proposal from {}!", self.id.0);
+            log::trace!("Random proposal from {}!", self.id.0);
             let proposal_msgs = self.create_proposal_messages(ctx.current_tick);
             ctx.outgoing_messages.extend(proposal_msgs);
         }

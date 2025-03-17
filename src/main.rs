@@ -28,13 +28,32 @@ struct Args {
     /// Seed to use for the random number generation. Should result in reproducible
     /// simulations.
     seed: Option<u64>,
+    /// If set, all logging events are printed to stdout. Useful for debugging,
+    /// but pretty noisy.
+    #[arg(short, long)]
+    verbose: bool,
 }
 
 fn main() {
     let args = Args::parse();
+
+    // TODO: implement your own logger specialized for simulated processes?
+    // maybe, but for now this works fine.
+    simple_logger::SimpleLogger::new()
+        .with_level(match args.verbose {
+            true => log::LevelFilter::Trace,
+            false => log::LevelFilter::Info,
+        })
+        .without_timestamps()
+        .init()
+        .unwrap();
+
     let seed = args.seed.unwrap_or_else(rand::random);
     let mut sim = simulation::Simulation::from_seed(seed);
-    sim.run();
+    let success = sim.run();
 
-    println!("Seed was: {seed}");
+    log::info!("Seed was: {seed}");
+    if !success {
+        log::error!("Simulation did not succeed!");
+    }
 }

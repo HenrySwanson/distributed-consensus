@@ -71,16 +71,16 @@ impl<M> Network<M> {
     where
         M: std::fmt::Debug,
     {
-        println!("Sending {} messages:", msgs.len());
+        log::trace!("Sending {} messages:", msgs.len());
         for msg in &msgs {
-            println!("  {} to {}: {:?}", from, msg.to, msg.msg);
+            log::trace!("  {} to {}: {:?}", from, msg.to, msg.msg);
         }
 
         self.in_flight
             .extend(msgs.into_iter().filter_map(|out_msg| {
                 // Q: do this at pop time or enqueue time?
                 if self.rng.random_bool(self.loss_probability) {
-                    println!("Dropping message {:?}", out_msg.msg);
+                    log::trace!("Dropping message {:?}", out_msg.msg);
                     return None;
                 }
 
@@ -100,7 +100,7 @@ impl<M> Network<M> {
     {
         if let Some(Reverse(packet)) = self.in_flight.peek() {
             if packet.arrival_time <= current_tick {
-                println!(
+                log::trace!(
                     "Received a message:  {} -> {}: {:?}",
                     packet.from, packet.to, packet.msg
                 );

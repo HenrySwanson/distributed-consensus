@@ -55,17 +55,17 @@ impl Simulation {
         }
     }
 
-    pub fn run(&mut self) {
+    pub fn run(&mut self) -> bool {
         let mut is_down: [_; N] = std::array::from_fn(|_| false);
 
         for _ in 0..MAX_TICKS {
             self.clock += 1;
-            println!("==== TICK {:04} ====", self.clock);
-            println!("{} messages pending...", self.network.len());
+            log::trace!("==== TICK {:04} ====", self.clock);
+            log::trace!("{} messages pending...", self.network.len());
 
             // Are we done?
             if self.processes.iter().all(|p| p.decided_value().is_some()) {
-                println!("Everyone has decided on a value!");
+                log::trace!("Everyone has decided on a value!");
                 break;
             }
 
@@ -75,12 +75,12 @@ impl Simulation {
                 // never bring down more than a quorum!
                 if !down && self.rng.random_bool(CRASH_PROBABILITY) {
                     if is_down.iter().filter(|x| **x).count() < F {
-                        println!("Process {} is crashing!", idx);
+                        log::trace!("Process {} is crashing!", idx);
                         self.processes[idx].crash();
                         is_down[idx] = true;
                     }
                 } else if down && self.rng.random_bool(UNCRASH_PROBABILITY) {
-                    println!("Process {} is back up!", idx);
+                    log::trace!("Process {} is back up!", idx);
                     is_down[idx] = false;
                 }
             }
@@ -105,28 +105,23 @@ impl Simulation {
 
             // Print current status
             for p in &self.processes {
-                println!("{}", p.status());
+                log::trace!("{}", p.status());
             }
-            println!("====================");
+            log::trace!("====================");
         }
 
-        println!("======== END OF SIMULATION ========");
+        log::trace!("======== END OF SIMULATION ========");
         for p in &self.processes {
-            println!(
+            log::trace!(
                 "Process {} has decided on value {}",
                 p.id.0,
                 p.decided_value().as_ref().map_or("NONE", |s| s.as_str())
             )
         }
-        if self
-            .processes
+
+        self.processes
             .iter()
             .all(|p| p.decided_value() == self.processes[0].decided_value())
-        {
-            println!("SUCCESS!");
-        } else {
-            println!("FAILURE!");
-        }
     }
 }
 
