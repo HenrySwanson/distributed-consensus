@@ -28,6 +28,14 @@ pub struct Simulation {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ProcessID(pub usize);
 
+pub struct Context<'sim> {
+    pub current_tick: u64,
+    pub rng: &'sim mut StdRng,
+    // TODO: parcel these two into a single network object?
+    pub received_messages: Vec<AddressedMessage>,
+    pub outgoing_messages: &'sim mut Vec<AddressedMessage>,
+}
+
 impl Simulation {
     pub fn from_seed(seed: u64) -> Self {
         let mut rng = StdRng::seed_from_u64(seed);
@@ -83,7 +91,13 @@ impl Simulation {
 
             // Tick each process
             for (idx, messages) in msgs_to_deliver.into_iter().enumerate() {
-                let replies = self.processes[idx].tick(self.clock, messages, &mut self.rng);
+                let mut replies = vec![];
+                self.processes[idx].tick(Context {
+                    current_tick: self.clock,
+                    rng: &mut self.rng,
+                    received_messages: messages,
+                    outgoing_messages: &mut replies,
+                });
                 self.network.enqueue(self.clock, replies);
             }
 

@@ -2,10 +2,10 @@ use std::collections::HashMap;
 use std::fmt::Display;
 
 use itertools::Itertools;
-use rand::rngs::StdRng;
 use rand::Rng;
 
 use crate::simulation::AddressedMessage;
+use crate::simulation::Context;
 use crate::simulation::ProcessID;
 use crate::F;
 use crate::N;
@@ -57,30 +57,22 @@ impl Process {
         }
     }
 
-    pub fn tick(
-        &mut self,
-        current_tick: u64,
-        messages: Vec<AddressedMessage>,
-        rng: &mut StdRng,
-    ) -> Vec<AddressedMessage> {
-        let mut replies = vec![];
-
+    pub fn tick(&mut self, ctx: Context) {
         // First check the timer and maybe fire a proposal message
         if self.decided_value.is_none()
-            && self.min_next_proposal_time <= current_tick
-            && rng.random_bool(PROPOSAL_PROBABILITY)
+            && self.min_next_proposal_time <= ctx.current_tick
+            && ctx.rng.random_bool(PROPOSAL_PROBABILITY)
         {
             println!("Random proposal from {}!", self.id.0);
-            let proposal_msgs = self.create_proposal_messages(current_tick);
-            replies.extend(proposal_msgs);
+            let proposal_msgs = self.create_proposal_messages(ctx.current_tick);
+            ctx.outgoing_messages.extend(proposal_msgs);
         }
 
         // Then process all messages received
-        for msg in messages {
-            replies.extend(self.recv_message(msg, current_tick))
+        for msg in ctx.received_messages {
+            ctx.outgoing_messages
+                .extend(self.recv_message(msg, ctx.current_tick))
         }
-
-        replies
     }
 
     pub fn crash(&mut self) {
