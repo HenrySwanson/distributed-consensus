@@ -13,7 +13,7 @@ const MAX_TICKS: u64 = 10000;
 const LOSS_PROBABILITY: f64 = 0.0;
 const MIN_NETWORK_DELAY: u64 = 3;
 const MAX_NETWORK_DELAY: u64 = 10;
-const CRASH_PROBABILITY: f64 = 0.2;
+const CRASH_PROBABILITY: f64 = 0.05;
 const UNCRASH_PROBABILITY: f64 = 0.2;
 
 pub use network::AddressedMessage;
@@ -29,8 +29,8 @@ pub struct Simulation {
 pub struct ProcessID(pub usize);
 
 impl Simulation {
-    pub fn new() -> Self {
-        let mut rng = StdRng::from_os_rng();
+    pub fn from_seed(seed: u64) -> Self {
+        let mut rng = StdRng::seed_from_u64(seed);
         Self {
             clock: 0,
             processes: std::array::from_fn(|id| Process::new(ProcessID(id))),

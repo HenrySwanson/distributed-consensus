@@ -1,3 +1,5 @@
+use clap::Parser;
+
 mod paxos;
 mod simulation;
 
@@ -21,9 +23,18 @@ const N: usize = 2 * F + 1;
 //   - Should we use async to implement these?
 //   - Implement crashing!
 
-fn main() {
-    println!("Hello, world!");
+#[derive(Parser, Debug)]
+struct Args {
+    /// Seed to use for the random number generation. Should result in reproducible
+    /// simulations.
+    seed: Option<u64>,
+}
 
-    let mut sim = simulation::Simulation::new();
+fn main() {
+    let args = Args::parse();
+    let seed = args.seed.unwrap_or_else(rand::random);
+    let mut sim = simulation::Simulation::from_seed(seed);
     sim.run();
+
+    println!("Seed was: {seed}");
 }
