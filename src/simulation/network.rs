@@ -116,30 +116,23 @@ impl<M> Network<M> {
                     packet.msg
                 );
 
-                let Reverse(packet) = self.in_flight.pop().unwrap();
+                // remove the packet from the network (peek() tells us this succeeds always)
+                let Reverse(Packet { msg, from, to, .. }) = self.in_flight.pop().unwrap();
 
                 if self.rng.random_bool(self.settings.replay_probability) {
-                    log::trace!(
-                        "Replaying a message:  {} -> {}: {:?}",
-                        packet.from,
-                        packet.to,
-                        packet.msg
-                    );
+                    log::trace!("Replaying a message:  {} -> {}: {:?}", from, to, msg);
                     // TODO: is there a better way to do this?
                     self.enqueue(
                         current_tick,
-                        packet.from,
+                        from,
                         vec![Outgoing {
-                            to: packet.to,
-                            msg: packet.msg.clone(),
+                            to,
+                            msg: msg.clone(),
                         }],
                     );
                 }
 
-                self.in_flight.pop().map(|x| {
-                    let Packet { msg, from, to, .. } = x.0;
-                    (Incoming { msg, from }, to)
-                });
+                return Some((Incoming { msg, from }, to))
             }
         }
         None

@@ -13,6 +13,9 @@ const N: usize = 2 * F + 1;
 // - Logger that knows which process, which tick it is, verbose/not-verbose, etc.
 // - Generalized consensus type (e.g. different for an RSM vs simple leader election)
 // - Clock skew?
+// - Return should be three-valued: complete consensus, partial consensus, broken
+//   - This will let us detect livelock!
+// - Ctrl-C to gently stop stress testing and give us a chance to print stats.
 // - Network
 //   - Implement message duplication
 //   - Do we distinguish UDP-like and TCP-like messages? (requires timeout/failure/retry)

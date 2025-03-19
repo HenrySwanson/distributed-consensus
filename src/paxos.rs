@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::fmt::Display;
 
 use itertools::Itertools;
@@ -28,7 +29,7 @@ pub struct Paxos {
     latest_promised: Option<ProposalID>,
     latest_accepted: Option<(ProposalID, String)>,
     // learner
-    acceptances_received: HashMap<ProposalID, (usize, String)>,
+    acceptances_received: HashMap<ProposalID, (HashSet<ProcessID>, String)>,
     decided_value: Option<String>,
 }
 
@@ -249,19 +250,23 @@ impl Paxos {
             // We're a Proposer and our value was accepted! Count how many Accepteds we get,
             // until we get a majority.
             Message::Accepted(proposal_id, value) => {
-                match self.acceptances_received.get_mut(&proposal_id) {
-                    Some((n, v)) => {
-                        assert_eq!(value, *v, "{:?}", proposal_id);
-                        *n += 1;
-                        if *n > F {
-                            // great, it's decided!
-                            self.decided_value = Some(value)
-                        }
-                    }
-                    None => {
-                        self.acceptances_received.insert(proposal_id, (0, value));
-                    }
+                // Look up the set of acceptors, inserting an empty set if not already present
+                let (acceptors, prev_value) = self
+                    .acceptances_received
+                    .entry(proposal_id)
+                    .or_insert_with(|| (HashSet::new(), value.clone()));
+
+                // quick assert: the value for this proposal is consistent!
+                // (meaningless if this is new but who cares)
+                assert_eq!(value, *prev_value, "{:?}", proposal_id);
+
+                // Add our acceptor
+                acceptors.insert(msg.from);
+                if acceptors.len() > F {
+                    // great, it's decided!
+                    self.decided_value = Some(value)
                 }
+
                 // never say anything
                 vec![]
             }
