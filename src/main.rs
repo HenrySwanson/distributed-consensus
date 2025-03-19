@@ -1,3 +1,7 @@
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
+use std::sync::Arc;
+
 use clap::Parser;
 use paxos::Paxos;
 
@@ -51,6 +55,20 @@ fn main() {
         .init()
         .unwrap();
 
+    let stop_signal = Arc::new(AtomicBool::new(false));
+
+    ctrlc::set_handler({
+        let stop_signal = stop_signal.clone();
+        move || {
+            println!("received Ctrl+C!");
+            let already_stopped = stop_signal.swap(true, Ordering::Relaxed);
+            if already_stopped {
+                std::process::exit(1);
+            }
+        }
+    })
+    .expect("Error setting Ctrl-C handler");
+
     if args.stress {
         for n in 0..u64::MAX {
             let seed = rand::random();
@@ -62,7 +80,13 @@ fn main() {
                 log::error!("Simulation {n} did not succeed for seed {seed}");
                 break;
             }
+
+            if stop_signal.load(Ordering::Relaxed) {
+                break;
+            }
         }
+
+        println!("Stress test completed!")
     } else {
         let seed = args.seed.unwrap_or_else(rand::random);
         let mut sim = simulation::Simulation::<Paxos>::from_seed(seed);

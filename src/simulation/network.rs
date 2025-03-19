@@ -132,7 +132,7 @@ impl<M> Network<M> {
                     );
                 }
 
-                return Some((Incoming { msg, from }, to))
+                return Some((Incoming { msg, from }, to));
             }
         }
         None
