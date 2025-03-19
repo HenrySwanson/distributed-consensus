@@ -137,10 +137,6 @@ impl<M> Network<M> {
         None
     }
 
-    pub fn is_empty(&self) -> bool {
-        self.in_flight.is_empty()
-    }
-
     pub fn len(&self) -> usize {
         self.in_flight.len()
     }

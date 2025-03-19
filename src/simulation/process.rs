@@ -13,3 +13,9 @@ pub trait Process {
     fn status(&self) -> String;
     fn decided_value(&self) -> Option<&String>;
 }
+
+impl std::fmt::Display for ProcessID {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}

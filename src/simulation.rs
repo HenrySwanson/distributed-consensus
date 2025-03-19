@@ -32,12 +32,13 @@ pub struct Simulation<P: Process> {
     rng: StdRng,
 }
 
+// TODO: give these content again?
 #[derive(Debug, Clone)]
 pub enum Consensus {
     None,
-    Partial(String),
-    Complete(String),
-    Conflict(String, String),
+    Partial,
+    Complete,
+    Conflict,
 }
 
 // TODO: take Process type instead?
@@ -146,22 +147,16 @@ impl<P: Process> Simulation<P> {
             .filter_map(|p| p.decided_value())
             .all_equal_value()
         {
-            Ok(value) => {
+            Ok(_) => {
                 // could be Complete or Partial
                 if self.processes.iter().all(|p| p.decided_value().is_some()) {
-                    Consensus::Complete(value.clone())
+                    Consensus::Complete
                 } else {
-                    Consensus::Partial(value.clone())
+                    Consensus::Partial
                 }
             }
-            Err(Some((x, y))) => Consensus::Conflict(x.clone(), y.clone()),
+            Err(Some(_)) => Consensus::Conflict,
             Err(None) => Consensus::None,
         }
-    }
-}
-
-impl std::fmt::Display for ProcessID {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.0.fmt(f)
     }
 }

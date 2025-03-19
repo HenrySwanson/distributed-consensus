@@ -21,6 +21,7 @@ const N: usize = 2 * F + 1;
 // - Formalize storage and crashing?
 // - Figure out how to cleanly handle assertion failures and not lose the seed
 // - Separate out P, A, L in Paxos
+// - Add "stats" like number of messages sent
 // - Network
 //   - Do we distinguish UDP-like and TCP-like messages? (requires timeout/failure/retry)
 //   - Add some kind of assertions on the message history? Tap-and-reduce, basically.
@@ -83,15 +84,15 @@ fn main() {
             let consensus = sim.run();
 
             match consensus {
-                Consensus::None | Consensus::Partial(_) => {
+                Consensus::None | Consensus::Partial => {
                     log::warn!("Simulation {n} did not complete for seed {seed}");
                     incompletes += 1;
                 }
-                Consensus::Complete(_) => {
+                Consensus::Complete => {
                     // log::info!("Simulation {n} did succeeded for seed {seed}");
                     successes += 1;
                 }
-                Consensus::Conflict(_, _) => {
+                Consensus::Conflict => {
                     log::error!("Simulation {n} did not succeed for seed {seed}");
                     failures += 1;
                 }
@@ -112,7 +113,7 @@ fn main() {
         let consensus = sim.run();
 
         log::info!("Seed was: {seed}");
-        if let Consensus::Complete(_) = consensus {
+        if let Consensus::Complete = consensus {
         } else {
             log::error!("Simulation did not succeed!");
         }
