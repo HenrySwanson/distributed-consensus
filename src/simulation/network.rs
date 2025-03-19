@@ -102,7 +102,9 @@ impl<M> Network<M> {
             if packet.arrival_time <= current_tick {
                 log::trace!(
                     "Received a message:  {} -> {}: {:?}",
-                    packet.from, packet.to, packet.msg
+                    packet.from,
+                    packet.to,
+                    packet.msg
                 );
                 return self.in_flight.pop().map(|x| {
                     let Packet { msg, from, to, .. } = x.0;
