@@ -19,7 +19,6 @@ const N: usize = 2 * F + 1;
 // - Generalized consensus type (e.g. different for an RSM vs simple leader election)
 // - Clock skew?
 // - Formalize storage and crashing?
-// - Figure out how to cleanly handle assertion failures and not lose the seed
 // - Separate out P, A, L in Paxos
 // - Add "stats" like number of messages sent
 // - Network
@@ -78,10 +77,16 @@ fn main() {
 
         for n in 0..u64::MAX {
             let seed = rand::random();
-            // log::info!("Seed is: {seed}");
 
             let mut sim = simulation::Simulation::<Paxos>::from_seed(seed);
-            let consensus = sim.run();
+            let consensus = match std::panic::catch_unwind(move || sim.run()) {
+                Ok(x) => x,
+                Err(panic) => {
+                    // log the failing seed and then resume unwinding
+                    log::info!("Seed was: {seed}");
+                    std::panic::resume_unwind(panic);
+                }
+            };
 
             match consensus {
                 Consensus::None | Consensus::Partial => {
