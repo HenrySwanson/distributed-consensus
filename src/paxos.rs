@@ -22,6 +22,9 @@ pub struct Paxos {
     pub id: ProcessID,
     // proposer
     current_proposal_id: Option<usize>,
+    last_issued_proposal: Option<usize>, // usually equal to the above, but persisted
+    // TODO: ^^this is a little awkward, but we need to somehow represent the state of
+    // "our last proposal was N, but we crashed during it and haven't issued N+1 yet".
     promises_received: HashMap<ProcessID, Option<(ProposalID, String)>>,
     superseded_by: Option<ProposalID>,
     min_next_proposal_time: u64,
@@ -30,7 +33,7 @@ pub struct Paxos {
     latest_accepted: Option<(ProposalID, String)>,
     // learner
     acceptances_received: HashMap<ProposalID, (HashSet<ProcessID>, String)>,
-    decided_value: Option<String>,
+    decided_value: Option<(ProposalID, String)>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -52,6 +55,7 @@ impl Process for Paxos {
         Self {
             id,
             current_proposal_id: None,
+            last_issued_proposal: None,
             promises_received: HashMap::new(),
             superseded_by: None,
             min_next_proposal_time: 0,
@@ -83,6 +87,7 @@ impl Process for Paxos {
     fn crash(&mut self) {
         // replace self with a fresh process, only carrying over a little info
         let old = std::mem::replace(self, Self::new(self.id));
+        self.last_issued_proposal = old.last_issued_proposal;
         self.latest_promised = old.latest_promised;
         self.latest_accepted = old.latest_accepted;
     }
@@ -90,10 +95,11 @@ impl Process for Paxos {
     // TODO: column-based? idk
     fn status(&self) -> String {
         format!(
-            "Process #{}: P {{ {}, [{}], superseded by: {} }}, A {{ {}, {} }}, L {{ {}, {} }}",
+            "Process #{}: P {{ {} ({}), [{}], superseded by: {} }}, A {{ {}, {} }}, L {{ {}, {} }}",
             self.id,
             // proposer
             display_or_none(&self.current_proposal_id),
+            display_or_none(&self.last_issued_proposal),
             self.promises_received
                 .iter()
                 .map(|(id, last_accepted)| format!("{} {}", id, display_or_none2(last_accepted),))
@@ -109,12 +115,12 @@ impl Process for Paxos {
                     .iter()
                     .format_with(", ", |(k, v), f| f(&format_args!("{}: {:?}", k, v)))
             ),
-            display_or_none(&self.decided_value)
+            display_or_none2(&self.decided_value)
         )
     }
 
     fn decided_value(&self) -> Option<&String> {
-        self.decided_value.as_ref()
+        self.decided_value.as_ref().map(|(_, value)| value)
     }
 }
 
@@ -130,11 +136,12 @@ impl Paxos {
 
     fn create_proposal_messages(&mut self, current_tick: u64) -> Vec<Outgoing<Message>> {
         // Send something higher than:
-        // - our previous proposal
+        // - our previous proposal (remember to check *stable* storage in case we crashed)
         // - anything we've ever seen from a Nack
-        let latest = std::cmp::max(self.current_proposal_id, self.superseded_by.map(|p| p.0));
+        let latest = std::cmp::max(self.last_issued_proposal, self.superseded_by.map(|p| p.0));
         let n = latest.map_or(0, |x| x + 1);
         self.current_proposal_id = Some(n);
+        self.last_issued_proposal = Some(n);
 
         // Wipe all knowledge of previous proposals
         self.promises_received.clear();
@@ -187,6 +194,9 @@ impl Paxos {
 
                 // if we already had quorum, don't even bother, we've already sent
                 // acceptances for this proposal
+                // NOTE: this is not just an optimization, it's safety-critical!
+                // if we get a late Promise that would change what value we propose,
+                // we *definitely* can't send a second round of Accepts
                 if self.promises_received.len() > F {
                     return vec![];
                 }
@@ -264,7 +274,7 @@ impl Paxos {
                 acceptors.insert(msg.from);
                 if acceptors.len() > F {
                     // great, it's decided!
-                    self.decided_value = Some(value)
+                    self.decided_value = Some((proposal_id, value))
                 }
 
                 // never say anything

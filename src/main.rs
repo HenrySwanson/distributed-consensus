@@ -18,11 +18,12 @@ const N: usize = 2 * F + 1;
 // - Logger that knows which process, which tick it is, verbose/not-verbose, etc.
 // - Generalized consensus type (e.g. different for an RSM vs simple leader election)
 // - Clock skew?
-// - Return should be three-valued: complete consensus, partial consensus, broken
-//   - This will let us detect livelock!
+// - Formalize storage and crashing?
+// - Figure out how to cleanly handle assertion failures and not lose the seed
+// - Separate out P, A, L in Paxos
 // - Network
-//   - Implement message duplication
 //   - Do we distinguish UDP-like and TCP-like messages? (requires timeout/failure/retry)
+//   - Add some kind of assertions on the message history? Tap-and-reduce, basically.
 // - Property testing
 //   - Allow "events" to happen from outside (e.g., network partition, crash) and test
 //     over sequences of these events.
@@ -76,6 +77,8 @@ fn main() {
 
         for n in 0..u64::MAX {
             let seed = rand::random();
+            // log::info!("Seed is: {seed}");
+
             let mut sim = simulation::Simulation::<Paxos>::from_seed(seed);
             let consensus = sim.run();
 

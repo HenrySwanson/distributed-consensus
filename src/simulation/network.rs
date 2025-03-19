@@ -80,9 +80,8 @@ impl<M> Network<M> {
     where
         M: std::fmt::Debug,
     {
-        log::trace!("Sending {} messages:", msgs.len());
         for msg in &msgs {
-            log::trace!("  {} to {}: {:?}", from, msg.to, msg.msg);
+            log::trace!("Sending a message:  {} -> {}: {:?}", from, msg.to, msg.msg);
         }
 
         self.in_flight
