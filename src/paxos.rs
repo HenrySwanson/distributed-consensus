@@ -7,6 +7,7 @@ use rand::Rng;
 use crate::simulation::Context;
 use crate::simulation::Incoming;
 use crate::simulation::Outgoing;
+use crate::simulation::Process;
 use crate::simulation::ProcessID;
 use crate::F;
 use crate::N;
@@ -16,7 +17,7 @@ const PROPOSAL_COOLDOWN: u64 = 10;
 const PROPOSAL_PROBABILITY: f64 = 0.05;
 
 #[derive(Debug)]
-pub struct Process {
+pub struct Paxos {
     pub id: ProcessID,
     // proposer
     current_proposal_id: Option<usize>,
@@ -43,8 +44,8 @@ pub enum Message {
     Nack(ProposalID),
 }
 
-impl Process {
-    pub fn new(id: ProcessID) -> Self {
+impl Process for Paxos {
+    fn new(id: ProcessID) -> Self {
         Self {
             id,
             current_proposal_id: None,
@@ -58,7 +59,7 @@ impl Process {
         }
     }
 
-    pub fn tick(&mut self, ctx: Context) {
+    fn tick(&mut self, ctx: Context) {
         // First check the timer and maybe fire a proposal message
         if self.decided_value.is_none()
             && self.min_next_proposal_time <= ctx.current_tick
@@ -76,13 +77,45 @@ impl Process {
         }
     }
 
-    pub fn crash(&mut self) {
+    fn crash(&mut self) {
         // replace self with a fresh process, only carrying over a little info
         let old = std::mem::replace(self, Self::new(self.id));
         self.latest_promised = old.latest_promised;
         self.latest_accepted = old.latest_accepted;
     }
 
+    // TODO: column-based? idk
+    fn status(&self) -> String {
+        format!(
+            "Process #{}: P {{ {}, [{}], superseded by: {} }}, A {{ {}, {} }}, L {{ {}, {} }}",
+            self.id,
+            // proposer
+            display_or_none(&self.current_proposal_id),
+            self.promises_received
+                .iter()
+                .map(|(id, last_accepted)| format!("{} {}", id, display_or_none2(last_accepted),))
+                .format(", "),
+            display_or_none(&self.superseded_by),
+            // acceptor
+            display_or_none(&self.latest_promised),
+            display_or_none2(&self.latest_accepted),
+            // learner
+            format_args!(
+                "{{{:?}}}",
+                self.acceptances_received
+                    .iter()
+                    .format_with(", ", |(k, v), f| f(&format_args!("{}: {:?}", k, v)))
+            ),
+            display_or_none(&self.decided_value)
+        )
+    }
+
+    fn decided_value(&self) -> Option<&String> {
+        self.decided_value.as_ref()
+    }
+}
+
+impl Paxos {
     fn msg_everybody(&self, msg: Message) -> Vec<Outgoing<Message>> {
         (0..N)
             .map(|i| Outgoing {
@@ -231,36 +264,6 @@ impl Process {
                 vec![]
             }
         }
-    }
-
-    // TODO: column-based? idk
-    pub fn status(&self) -> String {
-        format!(
-            "Process #{}: P {{ {}, [{}], superseded by: {} }}, A {{ {}, {} }}, L {{ {}, {} }}",
-            self.id,
-            // proposer
-            display_or_none(&self.current_proposal_id),
-            self.promises_received
-                .iter()
-                .map(|(id, last_accepted)| format!("{} {}", id, display_or_none2(last_accepted),))
-                .format(", "),
-            display_or_none(&self.superseded_by),
-            // acceptor
-            display_or_none(&self.latest_promised),
-            display_or_none2(&self.latest_accepted),
-            // learner
-            format_args!(
-                "{{{:?}}}",
-                self.acceptances_received
-                    .iter()
-                    .format_with(", ", |(k, v), f| f(&format_args!("{}: {:?}", k, v)))
-            ),
-            display_or_none(&self.decided_value)
-        )
-    }
-
-    pub fn decided_value(&self) -> Option<&String> {
-        self.decided_value.as_ref()
     }
 }
 

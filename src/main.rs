@@ -1,4 +1,5 @@
 use clap::Parser;
+use paxos::Paxos;
 
 mod paxos;
 mod simulation;
@@ -54,10 +55,10 @@ fn main() {
     if args.stress {
         for n in 0..u64::MAX {
             let seed = rand::random();
-            let mut sim = simulation::Simulation::from_seed(seed);
+            let mut sim = simulation::Simulation::<Paxos>::from_seed(seed);
             let success = sim.run();
             if success {
-                log::info!("Simulation {n} succeeded for seed {seed}")
+                // log::info!("Simulation {n} succeeded for seed {seed}")
             } else {
                 log::error!("Simulation {n} did not succeed for seed {seed}");
                 break;
@@ -65,7 +66,7 @@ fn main() {
         }
     } else {
         let seed = args.seed.unwrap_or_else(rand::random);
-        let mut sim = simulation::Simulation::from_seed(seed);
+        let mut sim = simulation::Simulation::<Paxos>::from_seed(seed);
         let success = sim.run();
 
         log::info!("Seed was: {seed}");

@@ -5,11 +5,11 @@ use rand::SeedableRng;
 
 use self::network::Network;
 use crate::paxos::Message;
-use crate::paxos::Process;
 use crate::F;
 use crate::N;
 
 mod network;
+mod process;
 
 const MAX_TICKS: u64 = 10000;
 const LOSS_PROBABILITY: f64 = 0.05;
@@ -20,16 +20,15 @@ const UNCRASH_PROBABILITY: f64 = 0.2;
 
 pub use network::Incoming;
 pub use network::Outgoing;
+pub use process::Process;
+pub use process::ProcessID;
 
-pub struct Simulation {
+pub struct Simulation<P> {
     clock: u64,
-    processes: [Process; N],
+    processes: [P; N],
     network: Network<Message>,
     rng: StdRng,
 }
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct ProcessID(pub usize);
 
 pub struct Context<'sim> {
     pub current_tick: u64,
@@ -39,12 +38,12 @@ pub struct Context<'sim> {
     pub outgoing_messages: &'sim mut Vec<Outgoing<Message>>,
 }
 
-impl Simulation {
+impl<P: Process> Simulation<P> {
     pub fn from_seed(seed: u64) -> Self {
         let mut rng = StdRng::seed_from_u64(seed);
         Self {
             clock: 0,
-            processes: std::array::from_fn(|id| Process::new(ProcessID(id))),
+            processes: std::array::from_fn(|id| P::new(ProcessID(id))),
             network: Network::new(
                 // TODO: okay to use StdRng for parent and child?
                 StdRng::from_rng(&mut rng),
@@ -112,10 +111,10 @@ impl Simulation {
         }
 
         log::trace!("======== END OF SIMULATION ========");
-        for p in &self.processes {
+        for (i, p) in self.processes.iter().enumerate() {
             log::trace!(
                 "Process {} has decided on value {}",
-                p.id.0,
+                i,
                 p.decided_value().as_ref().map_or("NONE", |s| s.as_str())
             )
         }
