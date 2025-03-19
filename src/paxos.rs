@@ -45,6 +45,8 @@ pub enum Message {
 }
 
 impl Process for Paxos {
+    type Message = Message;
+
     fn new(id: ProcessID) -> Self {
         Self {
             id,
@@ -59,7 +61,7 @@ impl Process for Paxos {
         }
     }
 
-    fn tick(&mut self, ctx: Context) {
+    fn tick(&mut self, ctx: Context<Message>) {
         // First check the timer and maybe fire a proposal message
         if self.decided_value.is_none()
             && self.min_next_proposal_time <= ctx.current_tick

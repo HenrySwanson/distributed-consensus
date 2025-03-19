@@ -23,19 +23,20 @@ pub use network::Outgoing;
 pub use process::Process;
 pub use process::ProcessID;
 
-pub struct Simulation<P> {
+pub struct Simulation<P: Process> {
     clock: u64,
     processes: [P; N],
-    network: Network<Message>,
+    network: Network<P::Message>,
     rng: StdRng,
 }
 
-pub struct Context<'sim> {
+// TODO: take Process type instead?
+pub struct Context<'sim, M> {
     pub current_tick: u64,
     pub rng: &'sim mut StdRng,
     // TODO: parcel these two into a single network object?
-    pub received_messages: Vec<Incoming<Message>>,
-    pub outgoing_messages: &'sim mut Vec<Outgoing<Message>>,
+    pub received_messages: Vec<Incoming<M>>,
+    pub outgoing_messages: &'sim mut Vec<Outgoing<M>>,
 }
 
 impl<P: Process> Simulation<P> {
