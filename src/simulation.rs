@@ -32,6 +32,14 @@ pub struct Simulation<P: Process> {
     rng: StdRng,
 }
 
+#[derive(Debug, Clone)]
+pub enum Consensus {
+    None,
+    Partial(String),
+    Complete(String),
+    Conflict(String, String),
+}
+
 // TODO: take Process type instead?
 pub struct Context<'sim, M> {
     pub current_tick: u64,
@@ -65,7 +73,7 @@ impl<P: Process> Simulation<P> {
         }
     }
 
-    pub fn run(&mut self) -> bool {
+    pub fn run(&mut self) -> Consensus {
         let mut is_down: [_; N] = std::array::from_fn(|_| false);
 
         for _ in 0..MAX_TICKS {
@@ -132,10 +140,23 @@ impl<P: Process> Simulation<P> {
         // Check whether all processes are in a consistent state. It's okay
         // for some to have decided on a value and others not, but we can't
         // have two processes deciding on two different values.
-        self.processes
+        match self
+            .processes
             .iter()
             .filter_map(|p| p.decided_value())
-            .all_equal()
+            .all_equal_value()
+        {
+            Ok(value) => {
+                // could be Complete or Partial
+                if self.processes.iter().all(|p| p.decided_value().is_some()) {
+                    Consensus::Complete(value.clone())
+                } else {
+                    Consensus::Partial(value.clone())
+                }
+            }
+            Err(Some((x, y))) => Consensus::Conflict(x.clone(), y.clone()),
+            Err(None) => Consensus::None,
+        }
     }
 }
 

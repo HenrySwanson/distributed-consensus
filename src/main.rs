@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use clap::Parser;
 use paxos::Paxos;
+use simulation::Consensus;
 
 mod paxos;
 mod simulation;
@@ -19,7 +20,6 @@ const N: usize = 2 * F + 1;
 // - Clock skew?
 // - Return should be three-valued: complete consensus, partial consensus, broken
 //   - This will let us detect livelock!
-// - Ctrl-C to gently stop stress testing and give us a chance to print stats.
 // - Network
 //   - Implement message duplication
 //   - Do we distinguish UDP-like and TCP-like messages? (requires timeout/failure/retry)
@@ -70,15 +70,28 @@ fn main() {
     .expect("Error setting Ctrl-C handler");
 
     if args.stress {
+        let mut successes = 0;
+        let mut incompletes = 0;
+        let mut failures = 0;
+
         for n in 0..u64::MAX {
             let seed = rand::random();
             let mut sim = simulation::Simulation::<Paxos>::from_seed(seed);
-            let success = sim.run();
-            if success {
-                // log::info!("Simulation {n} succeeded for seed {seed}")
-            } else {
-                log::error!("Simulation {n} did not succeed for seed {seed}");
-                break;
+            let consensus = sim.run();
+
+            match consensus {
+                Consensus::None | Consensus::Partial(_) => {
+                    log::warn!("Simulation {n} did not complete for seed {seed}");
+                    incompletes += 1;
+                }
+                Consensus::Complete(_) => {
+                    // log::info!("Simulation {n} did succeeded for seed {seed}");
+                    successes += 1;
+                }
+                Consensus::Conflict(_, _) => {
+                    log::error!("Simulation {n} did not succeed for seed {seed}");
+                    failures += 1;
+                }
             }
 
             if stop_signal.load(Ordering::Relaxed) {
@@ -86,14 +99,18 @@ fn main() {
             }
         }
 
-        println!("Stress test completed!")
+        println!(
+            "Stress test completed: {} succeeded, {} incomplete, {} failed",
+            successes, incompletes, failures
+        );
     } else {
         let seed = args.seed.unwrap_or_else(rand::random);
         let mut sim = simulation::Simulation::<Paxos>::from_seed(seed);
-        let success = sim.run();
+        let consensus = sim.run();
 
         log::info!("Seed was: {seed}");
-        if !success {
+        if let Consensus::Complete(_) = consensus {
+        } else {
             log::error!("Simulation did not succeed!");
         }
     }
