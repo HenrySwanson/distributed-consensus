@@ -1,4 +1,6 @@
 use itertools::Itertools;
+use network::NetworkSettings;
+use rand::distr::Uniform;
 use rand::rngs::StdRng;
 use rand::Rng;
 use rand::SeedableRng;
@@ -12,6 +14,7 @@ mod process;
 
 const MAX_TICKS: u64 = 10000;
 const LOSS_PROBABILITY: f64 = 0.05;
+const REPLAY_PROBABILITY: f64 = 0.05;
 const MIN_NETWORK_DELAY: u64 = 3;
 const MAX_NETWORK_DELAY: u64 = 10;
 const CRASH_PROBABILITY: f64 = 0.05;
@@ -47,9 +50,16 @@ impl<P: Process> Simulation<P> {
             network: Network::new(
                 // TODO: okay to use StdRng for parent and child?
                 StdRng::from_rng(&mut rng),
-                LOSS_PROBABILITY,
-                MIN_NETWORK_DELAY,
-                MAX_NETWORK_DELAY,
+                // TOOD: take this from constructor as well
+                NetworkSettings {
+                    loss_probability: LOSS_PROBABILITY,
+                    replay_probability: REPLAY_PROBABILITY,
+                    delay_distribution: Uniform::new_inclusive(
+                        MIN_NETWORK_DELAY,
+                        MAX_NETWORK_DELAY,
+                    )
+                    .expect("range error"),
+                },
             ),
             rng,
         }

@@ -5,7 +5,7 @@ pub struct ProcessID(pub usize);
 
 // TODO: generalize message and consensus types!
 pub trait Process {
-    type Message: std::fmt::Debug;
+    type Message: std::fmt::Debug + Clone;
 
     fn new(id: ProcessID) -> Self;
     fn tick(&mut self, ctx: Context<Self::Message>);
