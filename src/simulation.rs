@@ -4,7 +4,6 @@ use rand::Rng;
 use rand::SeedableRng;
 
 use self::network::Network;
-use crate::paxos::Message;
 use crate::F;
 use crate::N;
 

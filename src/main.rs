@@ -9,20 +9,16 @@ const F: usize = 2;
 const N: usize = 2 * F + 1;
 
 // TODO:
-// - Some kind of log that isn't stdout
-// - Deterministic replay
-//   - Could start over from the beginning, or rewind to snapshot and replay.
-//   - Latter seems harder, but we could do it with something like StdRng that can
-//     be cloned.
-// - Timeouts
-//   - Introduce global clock first, then allow for skew later
-//   - For rewind-and-replay, use StdRng so we can clone it as part of the saved state
+// - Initial settings (contains N, F, NACKS_ENABLED, etc)
+// - Logger that knows which process, which tick it is, verbose/not-verbose, etc.
+// - Generalized consensus type (e.g. different for an RSM vs simple leader election)
+// - Clock skew?
 // - Network
 //   - Implement message duplication
 //   - Do we distinguish UDP-like and TCP-like messages? (requires timeout/failure/retry)
-// - Other
-//   - Should we use async to implement these?
-//   - Implement crashing!
+// - Property testing
+//   - Allow "events" to happen from outside (e.g., network partition, crash) and test
+//     over sequences of these events.
 
 #[derive(Parser, Debug)]
 struct Args {
