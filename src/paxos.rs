@@ -198,6 +198,13 @@ impl Process {
                 if self.latest_promised.is_none_or(|old| proposal_id >= old) {
                     // accept it!
                     self.latest_accepted = Some((proposal_id, value.clone()));
+                    // After accepting this proposal, we must not accept any proposals older than this
+                    // one. We could check against self.latest_accepted here, but it's better to just
+                    // bump self.latest_promised, because we should not Promise to any proposals we
+                    // know we are going to reject later.
+                    // Also, we know that self.latest_promised <= proposal_id, so we don't need to
+                    // compute a maximum here.
+                    self.latest_promised = Some(proposal_id);
                     self.msg_everybody(Message::Accepted(proposal_id, value))
                 } else {
                     // ignore (or NAK)
@@ -242,7 +249,12 @@ impl Process {
             display_or_none(&self.latest_promised),
             display_or_none2(&self.latest_accepted),
             // learner
-            format_args!("hashmap of size {}", self.acceptances_received.len()),
+            format_args!(
+                "{{{:?}}}",
+                self.acceptances_received
+                    .iter()
+                    .format_with(", ", |(k, v), f| f(&format_args!("{}: {:?}", k, v)))
+            ),
             display_or_none(&self.decided_value)
         )
     }

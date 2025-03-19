@@ -1,3 +1,4 @@
+use itertools::Itertools;
 use rand::rngs::StdRng;
 use rand::Rng;
 use rand::SeedableRng;
@@ -119,9 +120,13 @@ impl Simulation {
             )
         }
 
+        // Check whether all processes are in a consistent state. It's okay
+        // for some to have decided on a value and others not, but we can't
+        // have two processes deciding on two different values.
         self.processes
             .iter()
-            .all(|p| p.decided_value() == self.processes[0].decided_value())
+            .filter_map(|p| p.decided_value())
+            .all_equal()
     }
 }
 
