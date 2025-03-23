@@ -67,7 +67,13 @@ impl Process for Paxos {
     }
 
     fn tick(&mut self, ctx: Context<Message>) {
-        // First check the timer and maybe fire a proposal message
+        // First, process all messages received
+        for msg in ctx.received_messages {
+            ctx.outgoing_messages
+                .extend(self.recv_message(msg, ctx.current_tick))
+        }
+
+        // Then, check the timer and maybe fire a proposal message
         if self.decided_value.is_none()
             && self.min_next_proposal_time <= ctx.current_tick
             && ctx.rng.random_bool(PROPOSAL_PROBABILITY)
@@ -75,12 +81,6 @@ impl Process for Paxos {
             log::trace!("Random proposal from {}!", self.id.0);
             let proposal_msgs = self.create_proposal_messages(ctx.current_tick);
             ctx.outgoing_messages.extend(proposal_msgs);
-        }
-
-        // Then process all messages received
-        for msg in ctx.received_messages {
-            ctx.outgoing_messages
-                .extend(self.recv_message(msg, ctx.current_tick))
         }
     }
 
