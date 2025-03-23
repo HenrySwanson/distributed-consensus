@@ -11,7 +11,7 @@ pub trait Process {
     fn tick(&mut self, ctx: Context<Self::Message>);
     fn crash(&mut self);
     fn status(&self) -> String;
-    fn decided_value(&self) -> Option<&String>;
+    fn decided_value(&self) -> Option<String>;
 }
 
 impl std::fmt::Display for ProcessID {

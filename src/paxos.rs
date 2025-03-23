@@ -14,8 +14,8 @@ use crate::F;
 use crate::N;
 
 const ENABLE_NACKS: bool = true;
-const PROPOSAL_COOLDOWN: u64 = 10;
-const PROPOSAL_PROBABILITY: f64 = 0.05;
+pub const PROPOSAL_COOLDOWN: u64 = 10;
+pub const PROPOSAL_PROBABILITY: f64 = 0.05;
 
 #[derive(Debug)]
 pub struct Paxos {
@@ -27,7 +27,7 @@ pub struct Paxos {
     // "our last proposal was N, but we crashed during it and haven't issued N+1 yet".
     promises_received: HashMap<ProcessID, Option<(ProposalID, String)>>,
     superseded_by: Option<ProposalID>,
-    min_next_proposal_time: u64,
+    pub min_next_proposal_time: u64,
     // acceptor
     latest_promised: Option<ProposalID>,
     latest_accepted: Option<(ProposalID, String)>,
@@ -90,6 +90,7 @@ impl Process for Paxos {
         self.last_issued_proposal = old.last_issued_proposal;
         self.latest_promised = old.latest_promised;
         self.latest_accepted = old.latest_accepted;
+        self.decided_value = old.decided_value;
     }
 
     // TODO: column-based? idk
@@ -119,8 +120,8 @@ impl Process for Paxos {
         )
     }
 
-    fn decided_value(&self) -> Option<&String> {
-        self.decided_value.as_ref().map(|(_, value)| value)
+    fn decided_value(&self) -> Option<String> {
+        self.decided_value.as_ref().map(|(_, value)| value.clone())
     }
 }
 
@@ -134,7 +135,8 @@ impl Paxos {
             .collect()
     }
 
-    fn create_proposal_messages(&mut self, current_tick: u64) -> Vec<Outgoing<Message>> {
+    // TODO: limit visibility again?
+    pub fn create_proposal_messages(&mut self, current_tick: u64) -> Vec<Outgoing<Message>> {
         // Send something higher than:
         // - our previous proposal (remember to check *stable* storage in case we crashed)
         // - anything we've ever seen from a Nack
@@ -153,7 +155,8 @@ impl Paxos {
         self.msg_everybody(Message::Prepare(n))
     }
 
-    fn recv_message(
+    // TODO: limit visibility again?
+    pub fn recv_message(
         &mut self,
         msg: Incoming<Message>,
         current_tick: u64,

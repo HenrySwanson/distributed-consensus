@@ -3,9 +3,10 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use clap::Parser;
-use paxos::Paxos;
+use multipaxos::MultiPaxos;
 use simulation::Consensus;
 
+mod multipaxos;
 mod paxos;
 mod simulation;
 
@@ -78,7 +79,7 @@ fn main() {
         for n in 0..u64::MAX {
             let seed = rand::random();
 
-            let mut sim = simulation::Simulation::<Paxos>::from_seed(seed);
+            let mut sim = simulation::Simulation::<MultiPaxos>::from_seed(seed);
             let consensus = match std::panic::catch_unwind(move || sim.run()) {
                 Ok(x) => x,
                 Err(panic) => {
@@ -114,7 +115,7 @@ fn main() {
         );
     } else {
         let seed = args.seed.unwrap_or_else(rand::random);
-        let mut sim = simulation::Simulation::<Paxos>::from_seed(seed);
+        let mut sim = simulation::Simulation::<MultiPaxos>::from_seed(seed);
         let consensus = sim.run();
 
         log::info!("Seed was: {seed}");
