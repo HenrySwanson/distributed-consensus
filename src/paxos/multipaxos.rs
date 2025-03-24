@@ -6,12 +6,14 @@ use crate::paxos::PROPOSAL_COOLDOWN;
 use crate::paxos::PROPOSAL_PROBABILITY;
 use crate::simulation::Context;
 use crate::simulation::Incoming;
+use crate::simulation::Merge;
 use crate::simulation::Outgoing;
 use crate::simulation::Process;
 use crate::simulation::ProcessID;
 
 const TARGET_LOG_SIZE: usize = 10;
-const MAX_LOG_SIZE: usize = 30;
+// TODO: if this is different it messes with the Consensus decision
+const MAX_LOG_SIZE: usize = TARGET_LOG_SIZE;
 
 #[derive(Debug)]
 pub struct MultiPaxos {
@@ -28,6 +30,7 @@ pub struct Message {
 
 impl Process for MultiPaxos {
     type Message = Message;
+    type Consensus = Vec<Option<String>>;
 
     fn new(id: ProcessID) -> Self {
         Self {
@@ -116,17 +119,38 @@ impl Process for MultiPaxos {
         )
     }
 
-    fn decided_value(&self) -> Option<String> {
-        // TODO: do something different here when we can return different
-        // consensus types
-        let values: Option<Vec<_>> = self
-            .instances
-            .iter()
-            .map(|x| x.decided_value())
+    fn is_done(&self) -> bool {
+        self.decided_value()
+            .into_iter()
             .chain(std::iter::repeat(None))
             .take(TARGET_LOG_SIZE)
-            .collect();
+            .all(|x| x.is_some())
+    }
 
-        values.map(|values| values.iter().join(","))
+    fn decided_value(&self) -> Vec<Option<String>> {
+        self.instances.iter().map(|x| x.decided_value()).collect()
+    }
+}
+
+impl Merge for Vec<Option<String>> {
+    fn empty() -> Self {
+        vec![]
+    }
+
+    fn merge(self, other: Self) -> Result<Self, (Self, Self)> {
+        let result: Option<Vec<_>> = self
+            .clone()
+            .into_iter()
+            .zip_longest(other.clone())
+            .map(|z| match z {
+                itertools::EitherOrBoth::Both(x, y) => x.merge(y).ok(),
+                itertools::EitherOrBoth::Left(x) => Some(x),
+                itertools::EitherOrBoth::Right(y) => Some(y),
+            })
+            .collect();
+        match result {
+            Some(vec) => Ok(vec),
+            None => Err((self, other)),
+        }
     }
 }

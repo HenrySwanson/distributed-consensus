@@ -1,6 +1,5 @@
 use std::ops::ControlFlow;
 
-use itertools::Itertools;
 use network::NetworkSettings;
 use rand::distr::Uniform;
 use rand::rngs::StdRng;
@@ -24,6 +23,7 @@ const UNCRASH_PROBABILITY: f64 = 0.2;
 
 pub use network::Incoming;
 pub use network::Outgoing;
+pub use process::Merge;
 pub use process::Process;
 pub use process::ProcessID;
 
@@ -96,11 +96,7 @@ impl<P: Process> Simulation<P> {
         log::trace!("{} messages pending...", self.network.len());
 
         // Are we done?
-        if self
-            .state
-            .iter()
-            .all(|p| p.process.decided_value().is_some())
-        {
+        if self.state.iter().all(|p| p.process.is_done()) {
             log::trace!("Everyone has decided on a value!");
             return ControlFlow::Break(());
         }
@@ -159,38 +155,36 @@ impl<P: Process> Simulation<P> {
         log::trace!("======== END OF SIMULATION ========");
         for (i, p) in self.state.iter().enumerate() {
             log::trace!(
-                "Process {} has decided on value {}",
+                "Process {} has decided on value {:?}",
                 i,
-                p.process
-                    .decided_value()
-                    .as_ref()
-                    .map_or("NONE", |s| s.as_str())
+                p.process.decided_value()
             )
         }
 
         // Check whether all processes are in a consistent state. It's okay
         // for some to have decided on a value and others not, but we can't
         // have two processes deciding on two different values.
-        match self
+        let values: Vec<_> = self
             .state
             .iter()
-            .filter_map(|p| p.process.decided_value())
-            .all_equal_value()
-        {
-            Ok(_) => {
-                // could be Complete or Partial
-                if self
-                    .state
-                    .iter()
-                    .all(|p| p.process.decided_value().is_some())
-                {
+            .map(|p| p.process.decided_value())
+            .collect();
+        let merged = values
+            .iter()
+            .cloned()
+            .try_fold(Merge::empty(), Merge::merge);
+        match merged {
+            Ok(merged) => {
+                // okay, lots of possibilities here
+                if merged == Merge::empty() {
+                    Consensus::None
+                } else if values.iter().all(|v| *v == merged) {
                     Consensus::Complete
                 } else {
                     Consensus::Partial
                 }
             }
-            Err(Some(_)) => Consensus::Conflict,
-            Err(None) => Consensus::None,
+            Err(_) => Consensus::Conflict,
         }
     }
 

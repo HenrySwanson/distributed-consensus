@@ -10,6 +10,7 @@ use super::PROPOSAL_COOLDOWN;
 use super::PROPOSAL_PROBABILITY;
 use crate::simulation::Context;
 use crate::simulation::Incoming;
+use crate::simulation::Merge;
 use crate::simulation::Outgoing;
 use crate::simulation::Process;
 use crate::simulation::ProcessID;
@@ -49,6 +50,7 @@ pub enum Message {
 
 impl Process for Paxos {
     type Message = Message;
+    type Consensus = Option<String>;
 
     fn new(id: ProcessID) -> Self {
         Self {
@@ -117,6 +119,10 @@ impl Process for Paxos {
             ),
             display_or_none2(&self.decided_value)
         )
+    }
+
+    fn is_done(&self) -> bool {
+        self.decided_value.is_some()
     }
 
     fn decided_value(&self) -> Option<String> {
@@ -279,6 +285,27 @@ impl Paxos {
 
                 // never say anything
                 vec![]
+            }
+        }
+    }
+}
+
+impl Merge for Option<String> {
+    fn empty() -> Self {
+        None
+    }
+
+    fn merge(self, other: Self) -> Result<Self, (Self, Self)> {
+        match (self, other) {
+            (None, None) => Ok(None),
+            (None, Some(y)) => Ok(Some(y)),
+            (Some(x), None) => Ok(Some(x)),
+            (Some(x), Some(y)) => {
+                if x == y {
+                    Ok(Some(x))
+                } else {
+                    Err((Some(x), Some(y)))
+                }
             }
         }
     }
