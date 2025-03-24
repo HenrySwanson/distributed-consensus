@@ -5,6 +5,7 @@ use std::sync::Arc;
 use clap::Parser;
 use multipaxos::MultiPaxos;
 use simulation::Consensus;
+use simulation::Stats;
 
 mod multipaxos;
 mod paxos;
@@ -76,18 +77,25 @@ fn main() {
         let mut incompletes = 0;
         let mut failures = 0;
 
+        let mut total_stats = Stats::new();
+
         for n in 0..u64::MAX {
             let seed = rand::random();
 
             let mut sim = simulation::Simulation::<MultiPaxos>::from_seed(seed);
-            let consensus = match std::panic::catch_unwind(move || sim.run()) {
+            let (consensus, stats) = match std::panic::catch_unwind(move || {
+                let consensus = sim.run();
+                (consensus, sim.stats())
+            }) {
                 Ok(x) => x,
                 Err(panic) => {
                     // log the failing seed and then resume unwinding
                     log::info!("Seed was: {seed}");
-                    std::panic::resume_unwind(panic);
+                    std::panic::resume_unwind(panic)
                 }
             };
+
+            total_stats.merge(stats);
 
             match consensus {
                 Consensus::None | Consensus::Partial => {
@@ -113,6 +121,12 @@ fn main() {
             "Stress test completed: {} succeeded, {} incomplete, {} failed",
             successes, incompletes, failures
         );
+        let total = (successes + incompletes + failures) as f64;
+        println!(
+            "Statistics: {:.2} average ticks to completion, {:.2} average messages sent",
+            total_stats.ticks_elapsed as f64 / total,
+            total_stats.num_messages_sent as f64 / total
+        )
     } else {
         let seed = args.seed.unwrap_or_else(rand::random);
         let mut sim = simulation::Simulation::<MultiPaxos>::from_seed(seed);
@@ -123,5 +137,7 @@ fn main() {
         } else {
             log::error!("Simulation did not succeed!");
         }
+
+        println!("{:?}", sim.stats());
     }
 }

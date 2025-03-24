@@ -13,6 +13,7 @@ pub struct Network<M> {
     in_flight: BinaryHeap<Reverse<Packet<M>>>,
     rng: StdRng,
     settings: NetworkSettings,
+    num_messages_sent: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -73,6 +74,7 @@ impl<M> Network<M> {
             in_flight: BinaryHeap::new(),
             rng,
             settings,
+            num_messages_sent: 0,
         }
     }
 
@@ -82,6 +84,7 @@ impl<M> Network<M> {
     {
         for msg in &msgs {
             log::trace!("Sending a message:  {} -> {}: {:?}", from, msg.to, msg.msg);
+            self.num_messages_sent += 1;
         }
 
         self.in_flight
@@ -139,6 +142,10 @@ impl<M> Network<M> {
 
     pub fn len(&self) -> usize {
         self.in_flight.len()
+    }
+
+    pub fn num_messages_sent(&self) -> u64 {
+        self.num_messages_sent
     }
 }
 

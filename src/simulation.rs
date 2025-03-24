@@ -52,6 +52,12 @@ pub struct Context<'sim, M> {
     pub outgoing_messages: &'sim mut Vec<Outgoing<M>>,
 }
 
+#[derive(Debug)]
+pub struct Stats {
+    pub ticks_elapsed: u64,
+    pub num_messages_sent: u64,
+}
+
 struct ProcessState<P> {
     process: P,
     is_down: bool,
@@ -186,5 +192,26 @@ impl<P: Process> Simulation<P> {
             Err(Some(_)) => Consensus::Conflict,
             Err(None) => Consensus::None,
         }
+    }
+
+    pub fn stats(&self) -> Stats {
+        Stats {
+            ticks_elapsed: self.clock,
+            num_messages_sent: self.network.num_messages_sent(),
+        }
+    }
+}
+
+impl Stats {
+    pub fn new() -> Self {
+        Self {
+            ticks_elapsed: 0,
+            num_messages_sent: 0,
+        }
+    }
+
+    pub fn merge(&mut self, other: Self) {
+        self.ticks_elapsed += other.ticks_elapsed;
+        self.num_messages_sent += other.num_messages_sent;
     }
 }
