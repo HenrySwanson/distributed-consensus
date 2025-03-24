@@ -23,7 +23,7 @@ pub struct MultiPaxos {
 #[derive(Debug, Clone)]
 pub struct Message {
     idx: usize,
-    msg: crate::paxos::Message,
+    msg: super::single_decree::Message,
 }
 
 impl Process for MultiPaxos {

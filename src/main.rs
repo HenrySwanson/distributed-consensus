@@ -3,11 +3,10 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use clap::Parser;
-use multipaxos::MultiPaxos;
+use paxos::MultiPaxos;
 use simulation::Consensus;
 use simulation::Stats;
 
-mod multipaxos;
 mod paxos;
 mod simulation;
 
@@ -22,7 +21,6 @@ const N: usize = 2 * F + 1;
 // - Clock skew?
 // - Formalize storage and crashing?
 // - Separate out P, A, L in Paxos
-// - Add "stats" like number of messages sent
 // - Network
 //   - Do we distinguish UDP-like and TCP-like messages? (requires timeout/failure/retry)
 //   - Add some kind of assertions on the message history? Tap-and-reduce, basically.
