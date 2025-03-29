@@ -11,8 +11,8 @@ mod paxos;
 mod simulation;
 
 // TODO: push down into sim
-const F: usize = 2;
-const N: usize = 2 * F + 1;
+const N: usize = 5;
+const QUORUM: usize = N / 2 + 1;
 
 // TODO:
 // - Initial settings (contains N, F, NACKS_ENABLED, etc)

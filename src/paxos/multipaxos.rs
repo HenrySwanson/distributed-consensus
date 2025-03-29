@@ -15,8 +15,8 @@ use crate::simulation::Incoming;
 use crate::simulation::Outgoing;
 use crate::simulation::Process;
 use crate::simulation::ProcessID;
-use crate::F;
 use crate::N;
+use crate::QUORUM;
 
 const HEARTBEAT_INTERVAL: u64 = PROPOSAL_COOLDOWN / 2;
 const NEXT_MSG_INTERVAL: u64 = 20;
@@ -112,7 +112,7 @@ impl Process for MultiPaxos {
                     leader.next_heartbeat_time = ctx.current_tick + HEARTBEAT_INTERVAL;
                 }
                 if leader.min_next_msg_time <= ctx.current_tick
-                    && leader.promises_received.len() > F
+                    && leader.promises_received.len() >= QUORUM
                     // ^^can only send new messages after phase 1!
                     // this is messy... can we do better?
                     && self.common.log.len() < MAX_LOG_SIZE
@@ -169,7 +169,7 @@ impl Process for MultiPaxos {
             self.common.id,
             match &self.phase {
                 Phase::Leader(leader) =>
-                    if leader.promises_received.len() > F {
+                    if leader.promises_received.len() >= QUORUM {
                         "Leader+"
                     } else {
                         "Leader"
@@ -469,13 +469,13 @@ impl Leader {
         }
 
         // if we already had quorum, don't re-send the accepts
-        if self.promises_received.len() > F {
+        if self.promises_received.len() >= QUORUM {
             return vec![];
         }
 
         // add this response and see if we have quorum
         self.promises_received.insert(from, previously_accepted);
-        if self.promises_received.len() <= F {
+        if self.promises_received.len() < QUORUM {
             // no quorum yet
             return vec![];
         }
@@ -538,13 +538,13 @@ impl Leader {
         let value = value.clone();
 
         // do we already have quorum? if so, ignore this
-        if acceptors.len() > F {
+        if acceptors.len() >= QUORUM {
             return vec![];
         }
 
         // add this accept and see if we have quorum
         acceptors.insert(from);
-        if acceptors.len() <= F {
+        if acceptors.len() < QUORUM {
             // no quorum yet
             return vec![];
         }

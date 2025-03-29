@@ -15,8 +15,8 @@ use crate::simulation::Merge;
 use crate::simulation::Outgoing;
 use crate::simulation::Process;
 use crate::simulation::ProcessID;
-use crate::F;
 use crate::N;
+use crate::QUORUM;
 
 #[derive(Debug)]
 pub struct Paxos {
@@ -202,13 +202,13 @@ impl Paxos {
                 // NOTE: this is not just an optimization, it's safety-critical!
                 // if we get a late Promise that would change what value we propose,
                 // we *definitely* can't send a second round of Accepts
-                if self.promises_received.len() > F {
+                if self.promises_received.len() >= QUORUM {
                     return vec![];
                 }
 
                 // add it and see if we have quorum
                 self.promises_received.insert(msg.from, latest_accepted);
-                if self.promises_received.len() > F {
+                if self.promises_received.len() >= QUORUM {
                     // take the most recently accepted value, or make our own
                     let value = self
                         .promises_received
@@ -277,7 +277,7 @@ impl Paxos {
 
                 // Add our acceptor
                 acceptors.insert(msg.from);
-                if acceptors.len() > F {
+                if acceptors.len() >= QUORUM {
                     // great, it's decided!
                     self.decided_value = Some((proposal_id, value))
                 }

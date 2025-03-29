@@ -7,8 +7,8 @@ use rand::Rng;
 use rand::SeedableRng;
 
 use self::network::Network;
-use crate::F;
 use crate::N;
+use crate::QUORUM;
 
 mod network;
 mod process;
@@ -104,9 +104,9 @@ impl<P: Process> Simulation<P> {
         // Randomly crash and uncrash
         for idx in 0..self.state.len() {
             let down = self.state[idx].is_down;
-            // never bring down more than a quorum!
+            // always keep a quorum alive
             if !down && self.rng.random_bool(CRASH_PROBABILITY) {
-                if self.state.iter().filter(|p| p.is_down).count() < F {
+                if self.state.iter().filter(|p| !p.is_down).count() > QUORUM {
                     log::trace!("Process {} is crashing!", idx);
                     self.state[idx].process.crash();
                     self.state[idx].is_down = true;
