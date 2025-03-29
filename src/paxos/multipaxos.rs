@@ -23,9 +23,13 @@ const NEXT_MSG_INTERVAL: u64 = 20;
 
 #[derive(Debug)]
 pub struct MultiPaxos {
-    id: ProcessID,
+    common: Common,
     phase: Phase,
-    // gotta track this even when we're not a leader
+}
+
+#[derive(Debug)]
+struct Common {
+    id: ProcessID,
     last_issued_proposal: Option<usize>,
     latest_promised: Option<ProposalID>,
     log: Vec<LogEntry>,
@@ -33,18 +37,24 @@ pub struct MultiPaxos {
 
 #[derive(Debug)]
 enum Phase {
-    // TODO: split into phase 1 and phase 2?
-    Leader {
-        first_unchosen: usize,
-        promises_received: HashMap<ProcessID, PreviouslyAccepted>,
-        uncommitted_slots: HashMap<usize, (String, HashSet<ProcessID>)>,
-        next_heartbeat_time: u64,
-        min_next_msg_time: u64,
-        value_counter: u64, // for generating different values
-    },
-    Follower {
-        min_next_proposal_time: u64,
-    },
+    Leader(Leader),
+    Follower(Follower),
+}
+
+#[derive(Debug)]
+// TODO: split into phase 1 and phase 2?
+struct Leader {
+    first_unchosen: usize,
+    promises_received: HashMap<ProcessID, PreviouslyAccepted>,
+    uncommitted_slots: HashMap<usize, (String, HashSet<ProcessID>)>,
+    next_heartbeat_time: u64,
+    min_next_msg_time: u64,
+    value_counter: u64, // for generating different values
+}
+
+#[derive(Debug)]
+struct Follower {
+    min_next_proposal_time: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -74,13 +84,15 @@ impl Process for MultiPaxos {
 
     fn new(id: ProcessID) -> Self {
         Self {
-            id,
-            last_issued_proposal: None,
-            latest_promised: None,
-            log: vec![],
-            phase: Phase::Follower {
-                min_next_proposal_time: PROPOSAL_COOLDOWN,
+            common: Common {
+                id,
+                last_issued_proposal: None,
+                latest_promised: None,
+                log: vec![],
             },
+            phase: Phase::Follower(Follower {
+                min_next_proposal_time: PROPOSAL_COOLDOWN,
+            }),
         }
     }
 
@@ -93,57 +105,46 @@ impl Process for MultiPaxos {
 
         // Then, check the timeout
         match &mut self.phase {
-            Phase::Leader {
-                first_unchosen: _,
-                promises_received,
-                uncommitted_slots,
-                next_heartbeat_time,
-                min_next_msg_time,
-                value_counter,
-            } => {
-                if *next_heartbeat_time <= ctx.current_tick {
+            Phase::Leader(leader) => {
+                if leader.next_heartbeat_time <= ctx.current_tick {
                     ctx.outgoing_messages
-                        .extend(msg_everybody_except(Message::Heartbeat, self.id));
-                    *next_heartbeat_time = ctx.current_tick + HEARTBEAT_INTERVAL;
+                        .extend(msg_everybody_except(Message::Heartbeat, self.common.id));
+                    leader.next_heartbeat_time = ctx.current_tick + HEARTBEAT_INTERVAL;
                 }
-                if *min_next_msg_time <= ctx.current_tick
-                    && promises_received.len() > F
+                if leader.min_next_msg_time <= ctx.current_tick
+                    && leader.promises_received.len() > F
                     // ^^can only send new messages after phase 1!
                     // this is messy... can we do better?
-                    && self.log.len() < MAX_LOG_SIZE
+                    && self.common.log.len() < MAX_LOG_SIZE
                     && ctx.rng.random_bool(PROPOSAL_PROBABILITY)
                 {
-                    log::trace!("Random command from {}!", self.id.0);
+                    log::trace!("Random command from {}!", self.common.id.0);
 
                     let n = self
+                        .common
                         .last_issued_proposal
                         .expect("need active proposal when leader");
-                    let slot = self.log.len();
-                    let value = format!("V{}.{}.{}", n, self.id, value_counter);
-                    *value_counter += 1;
+                    let slot = self.common.log.len();
+                    let value = format!("V{}.{}.{}", n, self.common.id, leader.value_counter);
+                    leader.value_counter += 1;
 
-                    ctx.outgoing_messages.extend(msg_everybody_except(
-                        Message::Accept(n, self.log.len(), value.clone()),
-                        self.id,
-                    ));
+                    let proposal_id = ProposalID(n, self.common.id);
+                    let accept_msgs = leader.start_accept_phase(
+                        &mut self.common,
+                        proposal_id,
+                        slot,
+                        value.clone(),
+                    );
 
-                    // fake an accept to self
-                    self.log
-                        .push(LogEntry::Accepted(ProposalID(n, self.id), value.clone()));
-
-                    // fake an accepted from self
-                    uncommitted_slots.insert(slot, (value, HashSet::from([self.id])));
+                    ctx.outgoing_messages.extend(accept_msgs);
                 }
             }
-            Phase::Follower {
-                min_next_proposal_time,
-                ..
-            } => {
-                if *min_next_proposal_time <= ctx.current_tick
+            Phase::Follower(follower) => {
+                if follower.min_next_proposal_time <= ctx.current_tick
                     && ctx.rng.random_bool(PROPOSAL_PROBABILITY)
                 {
                     // convert to leader and make a proposal
-                    log::trace!("Random proposal from {}!", self.id.0);
+                    log::trace!("Random proposal from {}!", self.common.id.0);
                     let proposal_msg = self.start_proposal(ctx.current_tick);
 
                     ctx.outgoing_messages
@@ -155,34 +156,33 @@ impl Process for MultiPaxos {
 
     fn crash(&mut self) {
         // replace self with a fresh process, only carrying over a little info
-        let old = std::mem::replace(self, Self::new(self.id));
-        self.last_issued_proposal = old.last_issued_proposal;
-        self.latest_promised = old.latest_promised;
-        self.log = old.log;
+        let old = std::mem::replace(self, Self::new(self.common.id));
+        self.common.last_issued_proposal = old.common.last_issued_proposal;
+        self.common.latest_promised = old.common.latest_promised;
+        self.common.log = old.common.log;
     }
 
     fn status(&self) -> String {
         // TODO: make this much more detailed
         format!(
             "Process #{}: ({}) Decided values: {}",
-            self.id,
+            self.common.id,
             match &self.phase {
-                Phase::Leader {
-                    promises_received, ..
-                } =>
-                    if promises_received.len() > F {
+                Phase::Leader(leader) =>
+                    if leader.promises_received.len() > F {
                         "Leader+"
                     } else {
                         "Leader"
                     },
-                Phase::Follower { .. } => "Follower",
+                Phase::Follower(_) => "Follower",
             },
-            self.log
+            self.common
+                .log
                 .iter()
                 .map(|entry| match entry {
-                    LogEntry::Empty => format!("EMPTY"),
+                    LogEntry::Empty => "EMPTY".to_string(),
                     LogEntry::Accepted(_, v) => format!("{v}*"),
-                    LogEntry::Committed(_, v) => format!("{}", v),
+                    LogEntry::Committed(_, v) => v.to_string(),
                 })
                 .format(",")
         )
@@ -197,7 +197,8 @@ impl Process for MultiPaxos {
     }
 
     fn decided_value(&self) -> Self::Consensus {
-        self.log
+        self.common
+            .log
             .iter()
             .map(|entry| match entry {
                 LogEntry::Empty => None,
@@ -210,19 +211,23 @@ impl Process for MultiPaxos {
 
 impl MultiPaxos {
     fn msg_everybody_else(&self, msg: Message) -> Vec<Outgoing<Message>> {
-        msg_everybody_except(msg, self.id)
+        msg_everybody_except(msg, self.common.id)
     }
 
     fn start_proposal(&mut self, current_tick: u64) -> Message {
         // our proposal should be higher than:
         // - anything we've sent
         // - anything we've ever seen
-        let latest = std::cmp::max(self.last_issued_proposal, self.latest_promised.map(|p| p.0));
+        let latest = std::cmp::max(
+            self.common.last_issued_proposal,
+            self.common.latest_promised.map(|p| p.0),
+        );
         let n = latest.map_or(0, |x| x + 1);
-        self.last_issued_proposal = Some(n);
+        self.common.last_issued_proposal = Some(n);
 
         // find the index of our first uncommitted entry
         let first_unchosen = self
+            .common
             .log
             .iter()
             .take_while(|entry| matches!(entry, LogEntry::Committed(_, _)))
@@ -230,17 +235,17 @@ impl MultiPaxos {
 
         // simulate receiving a prepare from yourself
         let promise_from_self = self.get_previously_accepted(first_unchosen);
-        self.latest_promised = Some(ProposalID(n, self.id));
+        self.common.latest_promised = Some(ProposalID(n, self.common.id));
 
         // set as leader
-        self.phase = Phase::Leader {
+        self.phase = Phase::Leader(Leader {
             first_unchosen,
-            promises_received: HashMap::from([(self.id, promise_from_self)]),
+            promises_received: HashMap::from([(self.common.id, promise_from_self)]),
             next_heartbeat_time: current_tick + HEARTBEAT_INTERVAL,
             uncommitted_slots: HashMap::new(),
             min_next_msg_time: current_tick + NEXT_MSG_INTERVAL,
             value_counter: 0,
-        };
+        });
 
         Message::Prepare(n, first_unchosen)
     }
@@ -252,124 +257,27 @@ impl MultiPaxos {
     ) -> Vec<Outgoing<Message>> {
         // what are we doing?
         match &mut self.phase {
-            Phase::Leader {
-                first_unchosen,
-                promises_received,
-                uncommitted_slots,
-                ..
-            } => {
+            Phase::Leader(leader) => {
                 let current_n = self
+                    .common
                     .last_issued_proposal
                     .expect("leader must have active proposal");
-                let current_proposal_id = ProposalID(current_n, self.id);
+                let current_proposal_id = ProposalID(current_n, self.common.id);
                 match msg.msg {
                     // messages we expect
                     Message::Promise(n, previously_accepted) => {
-                        // check that it's from our current proposal
-                        assert!(n <= current_n);
-                        if n != current_n {
-                            return vec![];
-                        }
-
-                        // if we already had quorum, don't re-send the accepts
-                        if promises_received.len() > F {
-                            return vec![];
-                        }
-
-                        // add this response and see if we have quorum
-                        promises_received.insert(msg.from, previously_accepted);
-                        if promises_received.len() <= F {
-                            // no quorum yet
-                            return vec![];
-                        }
-
-                        log::trace!("Reached quorum for proposal {}", current_proposal_id);
-
-                        // figure out what values we should propose
-                        let mut values = promises_received
-                            .clone()
-                            .into_values()
-                            .flatten()
-                            .into_grouping_map()
-                            .max_by_key(|_slot, (proposal_id, _val)| proposal_id.clone());
-
-                        // now fill all our gaps until we've used up all the values we
-                        // need to propagate
-                        assert_eq!(*uncommitted_slots, HashMap::new());
-                        let mut accept_msgs = vec![];
-                        for slot in *first_unchosen.. {
-                            if values.is_empty() {
-                                break;
-                            }
-
-                            let value = match values.remove(&slot) {
-                                Some((_old_proposal_id, value)) => value,
-                                None => String::from("NO-OP"),
-                            };
-
-                            accept_msgs.extend(msg_everybody_except(
-                                Message::Accept(
-                                    self.last_issued_proposal
-                                        .expect("need active proposal when leader"),
-                                    slot,
-                                    value.clone(),
-                                ),
-                                self.id,
-                            ));
-
-                            // fake an accept to self
-                            let entry = get_mut_extending_if_necessary(&mut self.log, slot, || {
-                                LogEntry::Empty
-                            });
-                            *entry = LogEntry::Accepted(current_proposal_id, value.clone());
-
-                            // fake an accepted from self
-                            uncommitted_slots.insert(slot, (value, HashSet::from([self.id])));
-                        }
-
-                        accept_msgs
+                        leader.handle_promise(&mut self.common, msg.from, n, previously_accepted)
                     }
                     Message::Accepted(n, slot) => {
-                        // check that it's from our current proposal
-                        assert!(n <= current_n);
-                        if n != current_n {
-                            return vec![];
-                        }
-
-                        // this should always be fine because we checked the proposal id above
-                        let (value, acceptors) = uncommitted_slots
-                            .get_mut(&slot)
-                            .expect("Accepted can only happen when we initiate it");
-                        let value = value.clone();
-
-                        // do we already have quorum? if so, ignore this
-                        if acceptors.len() > F {
-                            return vec![];
-                        }
-
-                        // add this accept and see if we have quorum
-                        acceptors.insert(msg.from);
-                        if acceptors.len() <= F {
-                            // no quorum yet
-                            return vec![];
-                        }
-
-                        // great! we can commit this one
-                        *self
-                            .log
-                            .get_mut(slot)
-                            .expect("self-accept should've initialized this one") =
-                            LogEntry::Committed(current_proposal_id, value.clone());
-
-                        self.msg_everybody_else(Message::Learned(current_n, slot, value))
+                        leader.handle_accepted(&mut self.common, msg.from, n, slot)
                     }
                     Message::Nack(proposal_id) => {
                         // did we get pre-empted?
                         if proposal_id > current_proposal_id {
                             // switch to follower!
-                            self.phase = Phase::Follower {
+                            self.phase = Phase::Follower(Follower {
                                 min_next_proposal_time: current_tick + PROPOSAL_COOLDOWN,
-                            };
+                            });
                         }
 
                         vec![]
@@ -382,9 +290,9 @@ impl MultiPaxos {
                         let other_proposal_id = ProposalID(n, msg.from);
                         if other_proposal_id > current_proposal_id {
                             // switch to follower and reprocess message
-                            self.phase = Phase::Follower {
+                            self.phase = Phase::Follower(Follower {
                                 min_next_proposal_time: current_tick + PROPOSAL_COOLDOWN,
-                            };
+                            });
                             self.recv_message(msg, current_tick)
                         } else {
                             // otherwise it's fine, just ignore it
@@ -398,31 +306,28 @@ impl MultiPaxos {
                     }
                 }
             }
-            Phase::Follower {
-                min_next_proposal_time,
-            } => {
+            Phase::Follower(follower) => {
                 // cool down the proposal timer
                 // TODO: should this only be for certain messages?
-                *min_next_proposal_time = current_tick + PROPOSAL_COOLDOWN;
+                follower.min_next_proposal_time = current_tick + PROPOSAL_COOLDOWN;
                 match msg.msg {
                     // messages we expect
                     Message::Prepare(n, first_unchosen) => {
-                        let proposal_id = ProposalID(n, msg.from);
                         // check if this is newer than our current proposal
-                        let reply = if self
-                            .latest_promised
-                            .is_none_or(|latest_promised| proposal_id >= latest_promised)
+                        let reply = match follower
+                            .make_promise_unless_obsolete(&mut self.common, ProposalID(n, msg.from))
                         {
-                            self.latest_promised = Some(proposal_id);
-
-                            // reply with all the entries leader requested
-                            Message::Promise(n, self.get_previously_accepted(first_unchosen))
-                        } else {
+                            // reply with all the entries that the leader requested
+                            Ok(()) => {
+                                Message::Promise(n, self.get_previously_accepted(first_unchosen))
+                            }
                             // NACK it
-                            if ENABLE_NACKS {
-                                Message::Nack(self.latest_promised.unwrap())
-                            } else {
-                                return vec![];
+                            Err(latest_promised) => {
+                                if ENABLE_NACKS {
+                                    Message::Nack(latest_promised)
+                                } else {
+                                    return vec![];
+                                }
                             }
                         };
 
@@ -435,43 +340,45 @@ impl MultiPaxos {
                     Message::Accept(n, slot, value) => {
                         let proposal_id = ProposalID(n, msg.from);
                         // accept it unless we've made a higher-numbered promise
-                        let reply = if self
-                            .latest_promised
-                            .is_none_or(|latest_promised| proposal_id >= latest_promised)
+                        let reply = match follower
+                            .make_promise_unless_obsolete(&mut self.common, proposal_id)
                         {
-                            self.latest_promised = Some(proposal_id);
-                            let entry = get_mut_extending_if_necessary(&mut self.log, slot, || {
-                                LogEntry::Empty
-                            });
-                            // sanity check
-                            match entry {
-                                LogEntry::Empty => {}
-                                LogEntry::Accepted(old_proposal_id, _) => {
-                                    assert!(
-                                        proposal_id >= *old_proposal_id,
-                                        "{} < {}",
-                                        proposal_id,
-                                        old_proposal_id
-                                    );
+                            Ok(()) => {
+                                let entry = get_mut_extending_if_necessary(
+                                    &mut self.common.log,
+                                    slot,
+                                    || LogEntry::Empty,
+                                );
+                                // sanity check
+                                match entry {
+                                    LogEntry::Empty => {}
+                                    LogEntry::Accepted(old_proposal_id, _) => {
+                                        assert!(
+                                            proposal_id >= *old_proposal_id,
+                                            "{} < {}",
+                                            proposal_id,
+                                            old_proposal_id
+                                        );
+                                    }
+                                    LogEntry::Committed(old_proposal_id, chosen_value) => {
+                                        assert!(proposal_id >= *old_proposal_id);
+                                        assert_eq!(value, *chosen_value);
+                                    }
                                 }
-                                LogEntry::Committed(old_proposal_id, chosen_value) => {
-                                    assert!(proposal_id >= *old_proposal_id);
-                                    assert_eq!(value, *chosen_value);
-                                }
-                            }
-                            *entry = LogEntry::Accepted(proposal_id, value);
+                                *entry = LogEntry::Accepted(proposal_id, value);
 
-                            // tell the leader we accepted
-                            Message::Accepted(n, slot)
-                        } else {
-                            // ignore (TODO: NACK)
-                            if ENABLE_NACKS {
-                                Message::Nack(self.latest_promised.unwrap())
-                            } else {
-                                return vec![];
+                                // tell the leader we accepted
+                                Message::Accepted(n, slot)
+                            }
+                            // NACK the leader
+                            Err(latest_promised) => {
+                                if ENABLE_NACKS {
+                                    Message::Nack(latest_promised)
+                                } else {
+                                    return vec![];
+                                }
                             }
                         };
-
                         vec![Outgoing {
                             to: msg.from,
                             msg: reply,
@@ -481,7 +388,9 @@ impl MultiPaxos {
                         // unconditional accept
                         let proposal_id = ProposalID(n, msg.from);
                         let entry =
-                            get_mut_extending_if_necessary(&mut self.log, slot, || LogEntry::Empty);
+                            get_mut_extending_if_necessary(&mut self.common.log, slot, || {
+                                LogEntry::Empty
+                            });
                         // sanity check
                         match entry {
                             LogEntry::Empty => {}
@@ -512,7 +421,7 @@ impl MultiPaxos {
         // WARNING: infinite iterator! `map_while` makes it finite
         (first_unchosen..)
             .map_while(|slot| {
-                let entry = self.log.get(slot)?;
+                let entry = self.common.log.get(slot)?;
                 match entry {
                     LogEntry::Empty => None,
                     LogEntry::Accepted(proposal_id, value)
@@ -539,4 +448,180 @@ fn msg_everybody_except(msg: Message, id: ProcessID) -> Vec<Outgoing<Message>> {
             }
         })
         .collect()
+}
+
+impl Leader {
+    fn handle_promise(
+        &mut self,
+        common: &mut Common,
+        from: ProcessID,
+        n: usize,
+        previously_accepted: PreviouslyAccepted,
+    ) -> Vec<Outgoing<Message>> {
+        let current_proposal_id = common
+            .last_proposal_id()
+            .expect("leader must have active proposal");
+
+        // check that it's from our current proposal
+        assert!(n <= current_proposal_id.0);
+        if n != current_proposal_id.0 {
+            return vec![];
+        }
+
+        // if we already had quorum, don't re-send the accepts
+        if self.promises_received.len() > F {
+            return vec![];
+        }
+
+        // add this response and see if we have quorum
+        self.promises_received.insert(from, previously_accepted);
+        if self.promises_received.len() <= F {
+            // no quorum yet
+            return vec![];
+        }
+
+        log::trace!("Reached quorum for proposal {}", current_proposal_id);
+
+        // figure out what values we should propose
+        let mut values = self
+            .promises_received
+            .clone()
+            .into_values()
+            .flatten()
+            .into_grouping_map()
+            .max_by_key(|_slot, (proposal_id, _val)| *proposal_id);
+
+        // now fill all our gaps until we've used up all the values we
+        // need to propagate
+        assert_eq!(self.uncommitted_slots, HashMap::new());
+        let mut accept_msgs = vec![];
+        for slot in self.first_unchosen.. {
+            if values.is_empty() {
+                break;
+            }
+
+            let value = match values.remove(&slot) {
+                Some((_old_proposal_id, value)) => value,
+                None => String::from("NO-OP"),
+            };
+
+            // send an accept to self, and to others
+            let msgs = self.start_accept_phase(common, current_proposal_id, slot, value.clone());
+            accept_msgs.extend(msgs);
+        }
+
+        accept_msgs
+    }
+
+    fn handle_accepted(
+        &mut self,
+        common: &mut Common,
+        from: ProcessID,
+        n: usize,
+        slot: usize,
+    ) -> Vec<Outgoing<Message>> {
+        let current_proposal_id = common
+            .last_proposal_id()
+            .expect("leader must have active proposal");
+
+        // check that it's from our current proposal
+        assert!(n <= current_proposal_id.0);
+        if n != current_proposal_id.0 {
+            return vec![];
+        }
+
+        // this should always be fine because we checked the proposal id above
+        let (value, acceptors) = self
+            .uncommitted_slots
+            .get_mut(&slot)
+            .expect("Accepted can only happen when we initiate it");
+        let value = value.clone();
+
+        // do we already have quorum? if so, ignore this
+        if acceptors.len() > F {
+            return vec![];
+        }
+
+        // add this accept and see if we have quorum
+        acceptors.insert(from);
+        if acceptors.len() <= F {
+            // no quorum yet
+            return vec![];
+        }
+
+        // great! we can commit this one
+        *common
+            .log
+            .get_mut(slot)
+            .expect("self-accept should've initialized this one") =
+            LogEntry::Committed(current_proposal_id, value.clone());
+
+        common.msg_everybody_else(Message::Learned(n, slot, value))
+    }
+
+    /// Begins a round of Phase 2, i.e., the sending of Accept() messages.
+    /// Returns the Accept messages that should be sent, and simulates the
+    /// effects of an Accept()/Accepted() request-response on ourselves.
+    ///
+    /// TODO: should we just create a simulated follower?
+    fn start_accept_phase(
+        &mut self,
+        common: &mut Common,
+        proposal_id: ProposalID,
+        slot: usize,
+        value: String,
+    ) -> Vec<Outgoing<Message>> {
+        // fake an Accept() message to self
+        let entry = get_mut_extending_if_necessary(&mut common.log, slot, || LogEntry::Empty);
+        // TODO: sanity checks?
+        *entry = LogEntry::Accepted(proposal_id, value.clone());
+
+        // fake the Accepted() reply from self
+        self.uncommitted_slots
+            .insert(slot, (value.clone(), HashSet::from([common.id])));
+
+        common.msg_everybody_else(Message::Accept(proposal_id.0, slot, value))
+    }
+}
+
+impl Follower {
+    /// Returns `Ok(())` and bumps internal state, unless we've already made a promise
+    /// to a higher-numbered proposal, in which case we return an `Err` containing that
+    /// proposal.
+    fn make_promise_unless_obsolete(
+        &mut self,
+        common: &mut Common,
+        proposal_id: ProposalID,
+    ) -> Result<(), ProposalID> {
+        if let Some(latest_promised) = &common.latest_promised {
+            if *latest_promised > proposal_id {
+                return Err(*latest_promised);
+            }
+        }
+
+        // update
+        common.latest_promised = Some(proposal_id);
+        Ok(())
+    }
+}
+
+impl Common {
+    fn last_proposal_id(&self) -> Option<ProposalID> {
+        self.last_issued_proposal.map(|n| ProposalID(n, self.id))
+    }
+
+    fn msg_everybody_else(&self, msg: Message) -> Vec<Outgoing<Message>> {
+        (0..N)
+            .filter_map(|i| {
+                if i == self.id.0 {
+                    None
+                } else {
+                    Some(Outgoing {
+                        to: ProcessID(i),
+                        msg: msg.clone(),
+                    })
+                }
+            })
+            .collect()
+    }
 }
