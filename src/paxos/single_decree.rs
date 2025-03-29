@@ -5,6 +5,7 @@ use std::fmt::Display;
 use itertools::Itertools;
 use rand::Rng;
 
+use super::ProposalID;
 use super::ENABLE_NACKS;
 use super::PROPOSAL_COOLDOWN;
 use super::PROPOSAL_PROBABILITY;
@@ -19,7 +20,7 @@ use crate::N;
 
 #[derive(Debug)]
 pub struct Paxos {
-    pub id: ProcessID,
+    id: ProcessID,
     // proposer
     current_proposal_id: Option<usize>,
     last_issued_proposal: Option<usize>, // usually equal to the above, but persisted
@@ -35,9 +36,6 @@ pub struct Paxos {
     acceptances_received: HashMap<ProposalID, (HashSet<ProcessID>, String)>,
     decided_value: Option<(ProposalID, String)>,
 }
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct ProposalID(usize, ProcessID);
 
 #[derive(Debug, Clone)]
 pub enum Message {
@@ -169,7 +167,8 @@ impl Paxos {
         match msg.msg {
             Message::Prepare(n) => {
                 let proposal = ProposalID(n, msg.from);
-                let reply = if self.latest_promised.is_none_or(|old| proposal > old) {
+                // TODO: should this be >?
+                let reply = if self.latest_promised.is_none_or(|old| proposal >= old) {
                     // make a promise, but do not accept a value (you haven't gotten one
                     // for this proposal yet!)
                     self.latest_promised = Some(proposal);

@@ -1,6 +1,7 @@
 use itertools::Itertools;
 use rand::Rng;
 
+use super::get_mut_extending_if_necessary;
 use crate::paxos::Paxos;
 use crate::paxos::PROPOSAL_COOLDOWN;
 use crate::paxos::PROPOSAL_PROBABILITY;
@@ -44,14 +45,9 @@ impl Process for NaiveMultiPaxos {
         // Apply the incoming messages, extending `self.instances` as necessary.
         for Incoming { from, msg } in ctx.received_messages {
             let idx = msg.idx;
-            let instance = match self.instances.get_mut(msg.idx) {
-                Some(x) => x,
-                None => {
-                    self.instances
-                        .resize_with(msg.idx + 1, || Paxos::new(self.id));
-                    self.instances.get_mut(msg.idx).unwrap()
-                }
-            };
+            let instance = get_mut_extending_if_necessary(&mut self.instances, msg.idx, || {
+                Paxos::new(self.id)
+            });
 
             ctx.outgoing_messages.extend(
                 instance
