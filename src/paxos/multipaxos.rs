@@ -418,10 +418,15 @@ impl MultiPaxos {
     }
 
     fn get_previously_accepted(&self, first_unchosen: usize) -> PreviouslyAccepted {
-        // WARNING: infinite iterator! `map_while` makes it finite
-        (first_unchosen..)
-            .map_while(|slot| {
-                let entry = self.common.log.get(slot)?;
+        // Rust's convention is to return None if the range is out-of-bounds, but we
+        // want an empty slice instead.
+        let tail_slice = self.common.log.get(first_unchosen..).unwrap_or(&[]);
+
+        tail_slice
+            .iter()
+            .enumerate()
+            .filter_map(|(i, entry)| {
+                let slot = first_unchosen + i;
                 match entry {
                     LogEntry::Empty => None,
                     LogEntry::Accepted(proposal_id, value)
