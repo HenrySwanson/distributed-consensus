@@ -1,7 +1,7 @@
-mod multipaxos;
+mod naive_multipaxos;
 mod single_decree;
 
-pub use multipaxos::MultiPaxos;
+pub use naive_multipaxos::NaiveMultiPaxos;
 pub use single_decree::Paxos;
 
 const ENABLE_NACKS: bool = true;

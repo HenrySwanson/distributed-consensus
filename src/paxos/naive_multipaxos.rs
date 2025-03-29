@@ -16,7 +16,7 @@ const TARGET_LOG_SIZE: usize = 10;
 const MAX_LOG_SIZE: usize = TARGET_LOG_SIZE;
 
 #[derive(Debug)]
-pub struct MultiPaxos {
+pub struct NaiveMultiPaxos {
     id: ProcessID,
     instances: Vec<Paxos>,
     min_next_proposal_time: u64,
@@ -28,7 +28,7 @@ pub struct Message {
     msg: super::single_decree::Message,
 }
 
-impl Process for MultiPaxos {
+impl Process for NaiveMultiPaxos {
     type Message = Message;
     type Consensus = Vec<Option<String>>;
 
