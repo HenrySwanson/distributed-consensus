@@ -2,7 +2,7 @@ use itertools::Itertools;
 use rand::Rng;
 
 use super::get_mut_extending_if_necessary;
-use crate::paxos::Paxos;
+use crate::paxos::SingleDecree;
 use crate::paxos::PROPOSAL_COOLDOWN;
 use crate::paxos::PROPOSAL_PROBABILITY;
 use crate::simulation::Context;
@@ -19,7 +19,7 @@ const MAX_LOG_SIZE: usize = TARGET_LOG_SIZE;
 #[derive(Debug)]
 pub struct NaiveMultiPaxos {
     id: ProcessID,
-    instances: Vec<Paxos>,
+    instances: Vec<SingleDecree>,
     min_next_proposal_time: u64,
 }
 
@@ -46,7 +46,7 @@ impl Process for NaiveMultiPaxos {
         for Incoming { from, msg } in ctx.received_messages {
             let idx = msg.idx;
             let instance = get_mut_extending_if_necessary(&mut self.instances, msg.idx, || {
-                Paxos::new(self.id)
+                SingleDecree::new(self.id)
             });
 
             ctx.outgoing_messages.extend(
@@ -82,7 +82,7 @@ impl Process for NaiveMultiPaxos {
             && ctx.rng.random_bool(PROPOSAL_PROBABILITY)
         {
             let new_idx = self.instances.len();
-            let mut new_instance = Paxos::new(self.id);
+            let mut new_instance = SingleDecree::new(self.id);
             let proposal_msgs = new_instance.create_proposal_messages(ctx.current_tick);
             ctx.outgoing_messages
                 .extend(proposal_msgs.into_iter().map(|msg| Outgoing {

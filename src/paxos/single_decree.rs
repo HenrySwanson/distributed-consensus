@@ -18,7 +18,7 @@ use crate::simulation::ProcessID;
 use crate::QUORUM;
 
 #[derive(Debug)]
-pub struct Paxos {
+pub struct SingleDecree {
     id: ProcessID,
     // proposer
     current_proposal_id: Option<usize>,
@@ -45,7 +45,7 @@ pub enum Message {
     Nack(ProposalID),
 }
 
-impl Process for Paxos {
+impl Process for SingleDecree {
     type Message = Message;
     type Consensus = Option<String>;
 
@@ -128,7 +128,7 @@ impl Process for Paxos {
     }
 }
 
-impl Paxos {
+impl SingleDecree {
     pub(super) fn create_proposal_messages(&mut self, current_tick: u64) -> Vec<Outgoing<Message>> {
         // Send something higher than:
         // - our previous proposal (remember to check *stable* storage in case we crashed)

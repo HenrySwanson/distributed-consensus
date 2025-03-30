@@ -1,4 +1,3 @@
-
 use network::NetworkSettings;
 use rand::distr::Uniform;
 use rand::rngs::StdRng;

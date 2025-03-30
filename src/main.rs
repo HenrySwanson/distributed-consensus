@@ -6,7 +6,7 @@ use std::sync::Arc;
 use clap::Parser;
 use paxos::MultiPaxos;
 use paxos::NaiveMultiPaxos;
-use paxos::Paxos;
+use paxos::SingleDecree;
 use simulation::Consensus;
 use simulation::Process;
 use simulation::Stats;
@@ -73,14 +73,14 @@ fn main() {
 
     if args.stress {
         match algorithm {
-            Algorithm::SingleDecree => stress_test::<Paxos>(),
+            Algorithm::SingleDecree => stress_test::<SingleDecree>(),
             Algorithm::NaiveMulti => stress_test::<NaiveMultiPaxos>(),
             Algorithm::Multi => stress_test::<MultiPaxos>(),
         }
     } else {
         let seed = args.seed.unwrap_or_else(rand::random);
         match algorithm {
-            Algorithm::SingleDecree => run_once::<Paxos>(seed),
+            Algorithm::SingleDecree => run_once::<SingleDecree>(seed),
             Algorithm::NaiveMulti => run_once::<NaiveMultiPaxos>(seed),
             Algorithm::Multi => run_once::<MultiPaxos>(seed),
         }

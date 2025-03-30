@@ -4,7 +4,7 @@ mod single_decree;
 
 pub use multipaxos::MultiPaxos;
 pub use naive_multipaxos::NaiveMultiPaxos;
-pub use single_decree::Paxos;
+pub use single_decree::SingleDecree;
 
 use crate::simulation::ProcessID;
 
