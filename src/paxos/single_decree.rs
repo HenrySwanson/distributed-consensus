@@ -239,12 +239,12 @@ impl SingleDecree {
                 if self.latest_promised.is_none_or(|old| proposal_id >= old) {
                     // accept it!
                     self.latest_accepted = Some((proposal_id, value.clone()));
-                    // After accepting this proposal, we must not accept any proposals older than this
-                    // one. We could check against self.latest_accepted here, but it's better to just
-                    // bump self.latest_promised, because we should not Promise to any proposals we
-                    // know we are going to reject later.
-                    // Also, we know that self.latest_promised <= proposal_id, so we don't need to
-                    // compute a maximum here.
+                    // After accepting this proposal, we must not accept any proposals older than
+                    // this one. We could check against self.latest_accepted here, but it's better
+                    // to just bump self.latest_promised, because we should not Promise to any
+                    // proposals we know we are going to reject later. Also, we know that
+                    // self.latest_promised <= proposal_id, so we don't need to compute a maximum
+                    // here.
                     self.latest_promised = Some(proposal_id);
                     Outgoing::broadcast_everyone(Message::Accepted(proposal_id, value)).collect()
                 } else {
