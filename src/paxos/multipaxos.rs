@@ -175,16 +175,15 @@ impl Process for MultiPaxos {
     }
 
     fn status(&self) -> String {
-        // TODO: make this much more detailed
         format!(
             "Process #{}: ({}) Log: {}",
             self.common.id,
             match &self.phase {
                 Phase::Leader(leader) =>
                     if leader.promises_received.len() >= QUORUM {
-                        "Leader+"
+                        "Leader+ "
                     } else {
-                        "Leader"
+                        "Leader  "
                     },
                 Phase::Follower(_) => "Follower",
             },
@@ -194,9 +193,9 @@ impl Process for MultiPaxos {
                 .map(|entry| match entry {
                     LogEntry::Empty => "EMPTY".to_string(),
                     LogEntry::Accepted(_, v) => format!("{v}*"),
-                    LogEntry::Committed(v) => v.to_string(),
+                    LogEntry::Committed(v) => format!("{v} "),
                 })
-                .format(",")
+                .format(" ")
         )
     }
 
@@ -554,8 +553,6 @@ impl Leader {
     /// Begins a round of Phase 2, i.e., the sending of Accept() messages.
     /// Returns the Accept messages that should be sent, and simulates the
     /// effects of an Accept()/Accepted() request-response on ourselves.
-    ///
-    /// TODO: should we just create a simulated follower?
     fn start_accept_phase(
         &mut self,
         common: &mut Common,

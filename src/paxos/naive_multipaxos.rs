@@ -104,9 +104,8 @@ impl Process for NaiveMultiPaxos {
     }
 
     fn status(&self) -> String {
-        // TODO: make this much more detailed
         format!(
-            "Process #{}: Decided values: {}",
+            "Process #{}: Log: {}",
             self.id,
             self.instances
                 .iter()

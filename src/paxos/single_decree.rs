@@ -167,7 +167,6 @@ impl Paxos {
         match msg.msg {
             Message::Prepare(n) => {
                 let proposal = ProposalID(n, msg.from);
-                // TODO: should this be >?
                 let reply = if self.latest_promised.is_none_or(|old| proposal >= old) {
                     // make a promise, but do not accept a value (you haven't gotten one
                     // for this proposal yet!)

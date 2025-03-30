@@ -21,12 +21,12 @@ const QUORUM: usize = N / 2 + 1;
 // TODO:
 // - Initial settings (contains N, F, NACKS_ENABLED, etc)
 // - Logger that knows which process, which tick it is, verbose/not-verbose, etc.
-// - Generalized consensus type (e.g. different for an RSM vs simple leader election)
 // - Clock skew?
-// - Formalize storage and crashing?
+// - Formalize storage?
+// - Separate crashing and uncrashing (and pass current time to fix the timer issue)
+// - Create timer class?
 // - Separate out P, A, L in Paxos
 // - Network
-//   - Do we distinguish UDP-like and TCP-like messages? (requires timeout/failure/retry)
 //   - Add some kind of assertions on the message history? Tap-and-reduce, basically.
 // - Property testing
 //   - Allow "events" to happen from outside (e.g., network partition, crash) and test

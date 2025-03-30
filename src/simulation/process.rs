@@ -3,7 +3,6 @@ use super::Context;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ProcessID(pub usize);
 
-// TODO: generalize message and consensus types!
 pub trait Process {
     type Message: std::fmt::Debug + Clone;
     type Consensus: Merge + std::fmt::Debug + Clone + Eq;
