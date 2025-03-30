@@ -34,7 +34,7 @@ struct Common {
     id: ProcessID,
     last_issued_proposal: Option<usize>,
     latest_promised: Option<ProposalID>,
-    log: Vec<LogEntry>,
+    log: Log,
 }
 
 #[derive(Debug)]
@@ -81,6 +81,9 @@ pub struct Gaps {
 type PreviouslyAccepted = HashMap<usize, (Option<ProposalID>, String)>;
 
 #[derive(Debug)]
+struct Log(Vec<LogEntry>);
+
+#[derive(Debug)]
 enum LogEntry {
     Empty,
     Accepted(ProposalID, String),
@@ -97,7 +100,7 @@ impl Process for MultiPaxos {
                 id,
                 last_issued_proposal: None,
                 latest_promised: None,
-                log: vec![],
+                log: Log::new(),
             },
             phase: Phase::Follower(Follower {
                 min_next_proposal_time: PROPOSAL_COOLDOWN,
@@ -348,23 +351,8 @@ impl MultiPaxos {
                             .make_promise_unless_obsolete(&mut self.common, proposal_id)
                         {
                             Ok(()) => {
-                                let entry = get_mut_extending_if_necessary(
-                                    &mut self.common.log,
-                                    slot,
-                                    || LogEntry::Empty,
-                                );
-                                // sanity check
-                                match entry {
-                                    LogEntry::Empty => {}
-                                    LogEntry::Accepted(old_proposal_id, _) => {
-                                        assert_ge!(proposal_id, *old_proposal_id);
-                                    }
-                                    LogEntry::Committed(chosen_value) => {
-                                        assert_eq!(value, *chosen_value);
-                                    }
-                                }
-                                *entry = LogEntry::Accepted(proposal_id, value);
-
+                                // record it in the log
+                                self.common.log.accept_value(proposal_id, slot, value);
                                 // tell the leader we accepted
                                 Message::Accepted(n, slot)
                             }
@@ -384,7 +372,7 @@ impl MultiPaxos {
                     }
                     Message::Learned(_, slot, value) => {
                         // unconditional accept
-                        self.common.commit_value(slot, value);
+                        self.common.log.commit_value(slot, value);
                         vec![]
                     }
                     // we are no longer a leader, we can't do anything about these
@@ -511,7 +499,7 @@ impl Leader {
                 // this value has been committed by someone, tell everyone
                 // to learn it
                 Some((None, value)) => {
-                    common.commit_value(slot, value.clone());
+                    common.log.commit_value(slot, value.clone());
                     common.msg_everybody_else(Message::Learned(n, slot, value))
                 }
             };
@@ -559,12 +547,7 @@ impl Leader {
         }
 
         // great! we can commit this one
-        *common
-            .log
-            .get_mut(slot)
-            .expect("self-accept should've initialized this one") =
-            LogEntry::Committed(value.clone());
-
+        common.log.commit_value(slot, value.clone());
         common.msg_everybody_else(Message::Learned(n, slot, value))
     }
 
@@ -581,9 +564,7 @@ impl Leader {
         value: String,
     ) -> Vec<Outgoing<Message>> {
         // fake an Accept() message to self
-        let entry = get_mut_extending_if_necessary(&mut common.log, slot, || LogEntry::Empty);
-        // TODO: sanity checks?
-        *entry = LogEntry::Accepted(proposal_id, value.clone());
+        common.log.accept_value(proposal_id, slot, value.clone());
 
         // fake the Accepted() reply from self
         self.uncommitted_slots
@@ -653,10 +634,43 @@ impl Common {
             tail_start: self.log.len(),
         }
     }
+}
+
+impl Log {
+    fn new() -> Self {
+        Self(vec![])
+    }
+
+    fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    fn iter(&self) -> impl Iterator<Item = &LogEntry> {
+        self.0.iter()
+    }
+
+    fn get(&self, slot: usize) -> Option<&LogEntry> {
+        self.0.get(slot)
+    }
+
+    fn accept_value(&mut self, proposal_id: ProposalID, slot: usize, value: String) {
+        let entry = get_mut_extending_if_necessary(&mut self.0, slot, || LogEntry::Empty);
+        // sanity check
+        match entry {
+            LogEntry::Empty => {}
+            LogEntry::Accepted(old_proposal_id, _) => {
+                assert_ge!(proposal_id, *old_proposal_id);
+            }
+            LogEntry::Committed(chosen_value) => {
+                assert_eq!(value, *chosen_value);
+            }
+        }
+        *entry = LogEntry::Accepted(proposal_id, value);
+    }
 
     fn commit_value(&mut self, slot: usize, value: String) {
         // unconditional accept
-        let entry = get_mut_extending_if_necessary(&mut self.log, slot, || LogEntry::Empty);
+        let entry = get_mut_extending_if_necessary(&mut self.0, slot, || LogEntry::Empty);
         // sanity check
         match entry {
             LogEntry::Empty => {}
