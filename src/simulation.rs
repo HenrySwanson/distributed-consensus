@@ -1,26 +1,14 @@
-use network::NetworkSettings;
-use rand::distr::Uniform;
 use rand::rngs::StdRng;
-use rand::Rng;
 use rand::SeedableRng;
 
 use self::network::Network;
 use crate::N;
-use crate::QUORUM;
 
 mod network;
 mod process;
 
-const MAX_TICKS: u64 = 10000;
-const LIVELOCK_MODE_THRESHOLD: u64 = MAX_TICKS * 4 / 5;
-const LOSS_PROBABILITY: f64 = 0.05;
-const REPLAY_PROBABILITY: f64 = 0.05;
-const MIN_NETWORK_DELAY: u64 = 3;
-const MAX_NETWORK_DELAY: u64 = 10;
-const CRASH_PROBABILITY: f64 = 0.05;
-const UNCRASH_PROBABILITY: f64 = 0.2;
-
 pub use network::Incoming;
+pub use network::NetworkSettings;
 pub use network::Outgoing;
 pub use process::Merge;
 pub use process::Process;
@@ -57,14 +45,13 @@ pub struct Stats {
     pub num_messages_sent: u64,
 }
 
-struct ProcessState<P> {
-    process: P,
-    is_down: bool,
+pub struct ProcessState<P> {
+    pub process: P,
+    pub is_down: bool,
 }
 
 impl<P: Process> Simulation<P> {
-    pub fn from_seed(seed: u64) -> Self {
-        let mut rng = StdRng::seed_from_u64(seed);
+    pub fn new(mut rng: StdRng, network_settings: NetworkSettings) -> Self {
         Self {
             clock: 0,
             state: std::array::from_fn(|id| ProcessState {
@@ -75,18 +62,18 @@ impl<P: Process> Simulation<P> {
                 // TODO: okay to use StdRng for parent and child?
                 StdRng::from_rng(&mut rng),
                 // TOOD: take this from constructor as well
-                NetworkSettings {
-                    loss_probability: LOSS_PROBABILITY,
-                    replay_probability: REPLAY_PROBABILITY,
-                    delay_distribution: Uniform::new_inclusive(
-                        MIN_NETWORK_DELAY,
-                        MAX_NETWORK_DELAY,
-                    )
-                    .expect("range error"),
-                },
+                network_settings,
             ),
             rng,
         }
+    }
+
+    pub fn get_process(&self, idx: usize) -> &ProcessState<P> {
+        &self.state[idx]
+    }
+
+    pub fn processes(&self) -> &[ProcessState<P>] {
+        &self.state
     }
 
     pub fn tick(&mut self) {
@@ -128,44 +115,6 @@ impl<P: Process> Simulation<P> {
             );
         }
         log::trace!("====================");
-    }
-
-    pub fn run(&mut self) -> Consensus {
-        for t in 0..MAX_TICKS {
-            // Are we done?
-            if self.state.iter().all(|p| p.process.is_done()) {
-                log::trace!("Everyone has decided on a value!");
-                break;
-            }
-
-            // Randomly crash and uncrash
-            let enforce_quorum = t > LIVELOCK_MODE_THRESHOLD;
-            for idx in 0..self.state.len() {
-                let down = self.state[idx].is_down;
-                if !down && self.rng.random_bool(CRASH_PROBABILITY) {
-                    let live_count = self.state.iter().filter(|p| !p.is_down).count();
-                    if !enforce_quorum || live_count > QUORUM {
-                        self.crash(idx);
-                    }
-                } else if down && self.rng.random_bool(UNCRASH_PROBABILITY) {
-                    self.uncrash(idx);
-                }
-            }
-
-            // Tick once
-            self.tick();
-        }
-
-        log::trace!("======== END OF SIMULATION ========");
-        for (i, p) in self.state.iter().enumerate() {
-            log::trace!(
-                "Process {} has decided on value {:?}",
-                i,
-                p.process.decided_value()
-            )
-        }
-
-        self.check_consensus()
     }
 
     pub fn stats(&self) -> Stats {

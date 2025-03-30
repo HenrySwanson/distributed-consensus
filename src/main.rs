@@ -7,11 +7,13 @@ use clap::Parser;
 use paxos::MultiPaxos;
 use paxos::NaiveMultiPaxos;
 use paxos::SingleDecree;
+use scenario::everything_scenario;
 use simulation::Consensus;
 use simulation::Process;
 use simulation::Stats;
 
 mod paxos;
+mod scenario;
 mod simulation;
 
 // TODO: push down into sim
@@ -103,11 +105,7 @@ where
     for n in 0..u64::MAX {
         let seed = rand::random();
 
-        let mut sim = simulation::Simulation::<P>::from_seed(seed);
-        let (consensus, stats) = match std::panic::catch_unwind(move || {
-            let consensus = sim.run();
-            (consensus, sim.stats())
-        }) {
+        let sim = match std::panic::catch_unwind(|| everything_scenario::<P>(seed)) {
             Ok(x) => x,
             Err(panic) => {
                 // log the failing seed and then resume unwinding
@@ -116,6 +114,8 @@ where
             }
         };
 
+        let consensus = sim.check_consensus();
+        let stats = sim.stats();
         total_stats.merge(stats);
 
         match consensus {
@@ -154,11 +154,10 @@ fn run_once<P>(seed: u64)
 where
     P: Process,
 {
-    let mut sim = simulation::Simulation::<P>::from_seed(seed);
-    let consensus = sim.run();
+    let sim = everything_scenario::<P>(seed);
 
     log::info!("Seed was: {seed}");
-    if let Consensus::Complete = consensus {
+    if let Consensus::Complete = sim.check_consensus() {
     } else {
         log::error!("Simulation did not succeed!");
     }
