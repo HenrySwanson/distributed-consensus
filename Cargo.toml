@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+all_asserts = "2.3.3"
 clap = { version = "4.5.32", features = ["derive"] }
 ctrlc = "3.4.5"
 itertools = "0.14.0"

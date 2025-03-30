@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
 
+use all_asserts::assert_ge;
+use all_asserts::assert_le;
 use itertools::Itertools;
 use rand::Rng;
 
@@ -355,12 +357,7 @@ impl MultiPaxos {
                                 match entry {
                                     LogEntry::Empty => {}
                                     LogEntry::Accepted(old_proposal_id, _) => {
-                                        assert!(
-                                            proposal_id >= *old_proposal_id,
-                                            "{} < {}",
-                                            proposal_id,
-                                            old_proposal_id
-                                        );
+                                        assert_ge!(proposal_id, *old_proposal_id);
                                     }
                                     LogEntry::Committed(chosen_value) => {
                                         assert_eq!(value, *chosen_value);
@@ -454,7 +451,7 @@ impl Leader {
             .expect("leader must have active proposal");
 
         // check that it's from our current proposal
-        assert!(n <= current_proposal_id.0);
+        assert_le!(n, current_proposal_id.0);
         if n != current_proposal_id.0 {
             return vec![];
         }
@@ -537,7 +534,7 @@ impl Leader {
             .expect("leader must have active proposal");
 
         // check that it's from our current proposal
-        assert!(n <= current_proposal_id.0);
+        assert_le!(n, current_proposal_id.0);
         if n != current_proposal_id.0 {
             return vec![];
         }

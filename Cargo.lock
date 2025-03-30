@@ -3,6 +3,12 @@
 version = 4
 
 [[package]]
+name = "all_asserts"
+version = "2.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "514ce16346f9fc96702fd52f2ae7e383b185516ee6f556efd7c3176be8fe7bea"
+
+[[package]]
 name = "anstream"
 version = "0.6.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -251,6 +257,7 @@ checksum = "d75b0bedcc4fe52caa0e03d9f1151a323e4aa5e2d78ba3580400cd3c9e2bc4bc"
 name = "paxos"
 version = "0.1.0"
 dependencies = [
+ "all_asserts",
  "clap",
  "ctrlc",
  "itertools",

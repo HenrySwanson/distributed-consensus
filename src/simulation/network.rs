@@ -1,6 +1,7 @@
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
 
+use all_asserts::assert_range;
 use rand::distr::Distribution;
 use rand::distr::Uniform;
 use rand::rngs::StdRng;
@@ -65,10 +66,8 @@ impl<M> Ord for Packet<M> {
 
 impl<M> Network<M> {
     pub fn new(rng: StdRng, settings: NetworkSettings) -> Self {
-        assert!(settings.loss_probability >= 0.0);
-        assert!(settings.loss_probability <= 1.0);
-        assert!(settings.replay_probability >= 0.0);
-        assert!(settings.replay_probability <= 1.0);
+        assert_range!(0.0..=1.0, settings.loss_probability);
+        assert_range!(0.0..=1.0, settings.replay_probability);
 
         Self {
             in_flight: BinaryHeap::new(),
