@@ -166,12 +166,18 @@ impl Process for MultiPaxos {
         }
     }
 
-    fn crash(&mut self) {
+    fn restore_from_crash(&mut self, current_tick: u64) {
         // replace self with a fresh process, only carrying over a little info
+        // (interestingly enough, this is the same as Common!)
         let old = std::mem::replace(self, Self::new(self.common.id));
         self.common.last_issued_proposal = old.common.last_issued_proposal;
         self.common.latest_promised = old.common.latest_promised;
         self.common.log = old.common.log;
+
+        // gotta set the timers right
+        self.phase = Phase::Follower(Follower {
+            min_next_proposal_time: current_tick + PROPOSAL_COOLDOWN,
+        });
     }
 
     fn status(&self) -> String {

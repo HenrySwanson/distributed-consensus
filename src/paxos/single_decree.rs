@@ -83,13 +83,14 @@ impl Process for Paxos {
         }
     }
 
-    fn crash(&mut self) {
+    fn restore_from_crash(&mut self, current_tick: u64) {
         // replace self with a fresh process, only carrying over a little info
         let old = std::mem::replace(self, Self::new(self.id));
         self.last_issued_proposal = old.last_issued_proposal;
         self.latest_promised = old.latest_promised;
         self.latest_accepted = old.latest_accepted;
         self.decided_value = old.decided_value;
+        self.min_next_proposal_time = current_tick + PROPOSAL_COOLDOWN;
     }
 
     // TODO: column-based? idk

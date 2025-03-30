@@ -97,10 +97,11 @@ impl Process for NaiveMultiPaxos {
         }
     }
 
-    fn crash(&mut self) {
+    fn restore_from_crash(&mut self, current_tick: u64) {
         for instance in &mut self.instances {
-            instance.crash();
+            instance.restore_from_crash(current_tick);
         }
+        self.min_next_proposal_time = current_tick + PROPOSAL_COOLDOWN;
     }
 
     fn status(&self) -> String {

@@ -10,7 +10,8 @@ pub trait Process {
     fn new(id: ProcessID) -> Self;
 
     fn tick(&mut self, ctx: Context<Self::Message>);
-    fn crash(&mut self);
+    // TODO: this is a bit awkward, how can it be improved?
+    fn restore_from_crash(&mut self, current_tick: u64);
 
     fn status(&self) -> String;
 

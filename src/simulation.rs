@@ -108,12 +108,12 @@ impl<P: Process> Simulation<P> {
             if !down && self.rng.random_bool(CRASH_PROBABILITY) {
                 if self.state.iter().filter(|p| !p.is_down).count() > QUORUM {
                     log::trace!("Process {} is crashing!", idx);
-                    self.state[idx].process.crash();
                     self.state[idx].is_down = true;
                 }
             } else if down && self.rng.random_bool(UNCRASH_PROBABILITY) {
                 log::trace!("Process {} is back up!", idx);
                 self.state[idx].is_down = false;
+                self.state[idx].process.restore_from_crash(self.clock);
             }
         }
 
@@ -123,8 +123,12 @@ impl<P: Process> Simulation<P> {
             msgs_to_deliver[to.0].push(msg);
         }
 
-        // Tick each process
+        // Tick each process, unless it is down
         for (idx, messages) in msgs_to_deliver.into_iter().enumerate() {
+            if self.state[idx].is_down {
+                continue;
+            }
+
             let mut replies = vec![];
             self.state[idx].process.tick(Context {
                 current_tick: self.clock,
@@ -137,7 +141,14 @@ impl<P: Process> Simulation<P> {
 
         // Print current status
         for p in &self.state {
-            log::trace!("{}", p.process.status());
+            log::trace!(
+                "{}",
+                if p.is_down {
+                    "DOWN".to_string()
+                } else {
+                    p.process.status()
+                }
+            );
         }
         log::trace!("====================");
 
