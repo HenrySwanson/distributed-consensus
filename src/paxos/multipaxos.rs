@@ -17,7 +17,6 @@ use crate::simulation::Incoming;
 use crate::simulation::Outgoing;
 use crate::simulation::Process;
 use crate::simulation::ProcessID;
-use crate::N;
 use crate::QUORUM;
 
 const HEARTBEAT_INTERVAL: u64 = PROPOSAL_COOLDOWN / 2;
@@ -120,7 +119,10 @@ impl Process for MultiPaxos {
             Phase::Leader(leader) => {
                 if leader.next_heartbeat_time <= ctx.current_tick {
                     ctx.outgoing_messages
-                        .extend(msg_everybody_except(Message::Heartbeat, self.common.id));
+                        .extend(Outgoing::broadcast_everyone_except(
+                            Message::Heartbeat,
+                            self.common.id,
+                        ));
                     leader.next_heartbeat_time = ctx.current_tick + HEARTBEAT_INTERVAL;
                 }
                 if leader.min_next_msg_time <= ctx.current_tick
@@ -160,7 +162,10 @@ impl Process for MultiPaxos {
                     let proposal_msg = self.start_proposal(ctx.current_tick);
 
                     ctx.outgoing_messages
-                        .extend(self.msg_everybody_else(proposal_msg))
+                        .extend(Outgoing::broadcast_everyone_except(
+                            proposal_msg,
+                            self.common.id,
+                        ))
                 }
             }
         }
@@ -227,10 +232,6 @@ impl Process for MultiPaxos {
 }
 
 impl MultiPaxos {
-    fn msg_everybody_else(&self, msg: Message) -> Vec<Outgoing<Message>> {
-        msg_everybody_except(msg, self.common.id)
-    }
-
     fn start_proposal(&mut self, current_tick: u64) -> Message {
         // our proposal should be higher than:
         // - anything we've sent
@@ -415,22 +416,6 @@ impl MultiPaxos {
     }
 }
 
-// TODO: remove this somehow
-fn msg_everybody_except(msg: Message, id: ProcessID) -> Vec<Outgoing<Message>> {
-    (0..N)
-        .filter_map(|i| {
-            if i == id.0 {
-                None
-            } else {
-                Some(Outgoing {
-                    to: ProcessID(i),
-                    msg: msg.clone(),
-                })
-            }
-        })
-        .collect()
-}
-
 impl Leader {
     fn handle_promise(
         &mut self,
@@ -505,7 +490,8 @@ impl Leader {
                 // to learn it
                 Some((None, value)) => {
                     common.log.commit_value(slot, value.clone());
-                    common.msg_everybody_else(Message::Learned(n, slot, value))
+                    Outgoing::broadcast_everyone_except(Message::Learned(n, slot, value), common.id)
+                        .collect()
                 }
             };
 
@@ -553,7 +539,7 @@ impl Leader {
 
         // great! we can commit this one
         common.log.commit_value(slot, value.clone());
-        common.msg_everybody_else(Message::Learned(n, slot, value))
+        Outgoing::broadcast_everyone_except(Message::Learned(n, slot, value), common.id).collect()
     }
 
     /// Begins a round of Phase 2, i.e., the sending of Accept() messages.
@@ -573,7 +559,8 @@ impl Leader {
         self.uncommitted_slots
             .insert(slot, (value.clone(), HashSet::from([common.id])));
 
-        common.msg_everybody_else(Message::Accept(proposal_id.0, slot, value))
+        Outgoing::broadcast_everyone_except(Message::Accept(proposal_id.0, slot, value), common.id)
+            .collect()
     }
 }
 
@@ -601,21 +588,6 @@ impl Follower {
 impl Common {
     fn last_proposal_id(&self) -> Option<ProposalID> {
         self.last_issued_proposal.map(|n| ProposalID(n, self.id))
-    }
-
-    fn msg_everybody_else(&self, msg: Message) -> Vec<Outgoing<Message>> {
-        (0..N)
-            .filter_map(|i| {
-                if i == self.id.0 {
-                    None
-                } else {
-                    Some(Outgoing {
-                        to: ProcessID(i),
-                        msg: msg.clone(),
-                    })
-                }
-            })
-            .collect()
     }
 
     /// Returns a [Gaps] representing the set of uncommitted entries in the log.

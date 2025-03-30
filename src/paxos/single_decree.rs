@@ -15,7 +15,6 @@ use crate::simulation::Merge;
 use crate::simulation::Outgoing;
 use crate::simulation::Process;
 use crate::simulation::ProcessID;
-use crate::N;
 use crate::QUORUM;
 
 #[derive(Debug)]
@@ -130,15 +129,6 @@ impl Process for Paxos {
 }
 
 impl Paxos {
-    fn msg_everybody(&self, msg: Message) -> Vec<Outgoing<Message>> {
-        (0..N)
-            .map(|i| Outgoing {
-                to: ProcessID(i),
-                msg: msg.clone(),
-            })
-            .collect()
-    }
-
     pub(super) fn create_proposal_messages(&mut self, current_tick: u64) -> Vec<Outgoing<Message>> {
         // Send something higher than:
         // - our previous proposal (remember to check *stable* storage in case we crashed)
@@ -155,7 +145,7 @@ impl Paxos {
         // Set the proposal cooldown timer
         self.min_next_proposal_time = current_tick + PROPOSAL_COOLDOWN;
 
-        self.msg_everybody(Message::Prepare(n))
+        Outgoing::broadcast_everyone(Message::Prepare(n)).collect()
     }
 
     pub(super) fn recv_message(
@@ -218,7 +208,7 @@ impl Paxos {
                         .map_or(format!("V{}.{}", n, self.id), |(_, value)| value.clone());
 
                     // now send that message out to a quorum
-                    self.msg_everybody(Message::Accept(n, value))
+                    Outgoing::broadcast_everyone(Message::Accept(n, value)).collect()
                 } else {
                     // no quorum yet
                     vec![]
@@ -256,7 +246,7 @@ impl Paxos {
                     // Also, we know that self.latest_promised <= proposal_id, so we don't need to
                     // compute a maximum here.
                     self.latest_promised = Some(proposal_id);
-                    self.msg_everybody(Message::Accepted(proposal_id, value))
+                    Outgoing::broadcast_everyone(Message::Accepted(proposal_id, value)).collect()
                 } else {
                     // ignore (or NAK)
                     vec![]

@@ -148,6 +148,29 @@ impl<M> Network<M> {
     }
 }
 
+impl<M: Clone> Outgoing<M> {
+    pub fn broadcast(
+        msg: M,
+        recipients: impl Iterator<Item = ProcessID>,
+    ) -> impl Iterator<Item = Self> {
+        recipients.map(move |to| Outgoing {
+            to,
+            msg: msg.clone(),
+        })
+    }
+
+    pub fn broadcast_everyone(msg: M) -> impl Iterator<Item = Self> {
+        Outgoing::broadcast(msg, (0..crate::N).map(ProcessID))
+    }
+
+    pub fn broadcast_everyone_except(msg: M, id: ProcessID) -> impl Iterator<Item = Self> {
+        Outgoing::broadcast(
+            msg,
+            (0..crate::N).filter(move |i| *i != id.0).map(ProcessID),
+        )
+    }
+}
+
 impl Default for NetworkSettings {
     fn default() -> Self {
         Self {
