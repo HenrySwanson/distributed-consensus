@@ -8,11 +8,13 @@ use rand::SeedableRng;
 
 use self::network::Network;
 use crate::N;
+use crate::QUORUM;
 
 mod network;
 mod process;
 
 const MAX_TICKS: u64 = 10000;
+const LIVELOCK_MODE_THRESHOLD: u64 = MAX_TICKS * 4 / 5;
 const LOSS_PROBABILITY: f64 = 0.05;
 const REPLAY_PROBABILITY: f64 = 0.05;
 const MIN_NETWORK_DELAY: u64 = 3;
@@ -89,7 +91,7 @@ impl<P: Process> Simulation<P> {
         }
     }
 
-    pub fn tick(&mut self) -> ControlFlow<(), ()> {
+    pub fn tick(&mut self, enforce_quorum: bool) -> ControlFlow<(), ()> {
         self.clock += 1;
         log::trace!("==== TICK {:04} ====", self.clock);
         log::trace!("{} messages pending...", self.network.len());
@@ -104,8 +106,11 @@ impl<P: Process> Simulation<P> {
         for idx in 0..self.state.len() {
             let down = self.state[idx].is_down;
             if !down && self.rng.random_bool(CRASH_PROBABILITY) {
-                log::trace!("Process {} is crashing!", idx);
-                self.state[idx].is_down = true;
+                let live_count = self.state.iter().filter(|p| !p.is_down).count();
+                if !enforce_quorum || live_count > QUORUM {
+                    log::trace!("Process {} is crashing!", idx);
+                    self.state[idx].is_down = true;
+                }
             } else if down && self.rng.random_bool(UNCRASH_PROBABILITY) {
                 log::trace!("Process {} is back up!", idx);
                 self.state[idx].is_down = false;
@@ -152,8 +157,9 @@ impl<P: Process> Simulation<P> {
     }
 
     pub fn run(&mut self) -> Consensus {
-        for _ in 0..MAX_TICKS {
-            match self.tick() {
+        for t in 0..MAX_TICKS {
+            let enforce_quorum = t > LIVELOCK_MODE_THRESHOLD;
+            match self.tick(enforce_quorum) {
                 ControlFlow::Continue(_) => {}
                 ControlFlow::Break(_) => break,
             }
