@@ -63,19 +63,20 @@ pub enum Message {
     Promise(usize, PreviouslyAccepted),
     Accept(usize, usize, String),
     Accepted(usize, usize),
-    Learned(usize, usize, String),
+    Learned(usize, usize, String), // TODO: don't need proposal number?
     Nack(ProposalID),
     Heartbeat,
 }
 
-// TODO: also return previously committed
-type PreviouslyAccepted = HashMap<usize, (ProposalID, String)>;
+// None for proposal id indicates committed
+// TODO: make this better structured
+type PreviouslyAccepted = HashMap<usize, (Option<ProposalID>, String)>;
 
 #[derive(Debug)]
 enum LogEntry {
     Empty,
     Accepted(ProposalID, String),
-    Committed(ProposalID, String), // TODO: drop proposal id
+    Committed(String),
 }
 
 impl Process for MultiPaxos {
@@ -165,7 +166,7 @@ impl Process for MultiPaxos {
     fn status(&self) -> String {
         // TODO: make this much more detailed
         format!(
-            "Process #{}: ({}) Decided values: {}",
+            "Process #{}: ({}) Log: {}",
             self.common.id,
             match &self.phase {
                 Phase::Leader(leader) =>
@@ -182,7 +183,7 @@ impl Process for MultiPaxos {
                 .map(|entry| match entry {
                     LogEntry::Empty => "EMPTY".to_string(),
                     LogEntry::Accepted(_, v) => format!("{v}*"),
-                    LogEntry::Committed(_, v) => v.to_string(),
+                    LogEntry::Committed(v) => v.to_string(),
                 })
                 .format(",")
         )
@@ -203,7 +204,7 @@ impl Process for MultiPaxos {
             .map(|entry| match entry {
                 LogEntry::Empty => None,
                 LogEntry::Accepted(_, _) => None,
-                LogEntry::Committed(_, v) => Some(v.clone()),
+                LogEntry::Committed(v) => Some(v.clone()),
             })
             .collect()
     }
@@ -230,7 +231,7 @@ impl MultiPaxos {
             .common
             .log
             .iter()
-            .take_while(|entry| matches!(entry, LogEntry::Committed(_, _)))
+            .take_while(|entry| matches!(entry, LogEntry::Committed(_)))
             .count();
 
         // simulate receiving a prepare from yourself
@@ -360,8 +361,7 @@ impl MultiPaxos {
                                             old_proposal_id
                                         );
                                     }
-                                    LogEntry::Committed(old_proposal_id, chosen_value) => {
-                                        assert!(proposal_id >= *old_proposal_id);
+                                    LogEntry::Committed(chosen_value) => {
                                         assert_eq!(value, *chosen_value);
                                     }
                                 }
@@ -384,22 +384,9 @@ impl MultiPaxos {
                             msg: reply,
                         }]
                     }
-                    Message::Learned(n, slot, value) => {
+                    Message::Learned(_, slot, value) => {
                         // unconditional accept
-                        let proposal_id = ProposalID(n, msg.from);
-                        let entry =
-                            get_mut_extending_if_necessary(&mut self.common.log, slot, || {
-                                LogEntry::Empty
-                            });
-                        // sanity check
-                        match entry {
-                            LogEntry::Empty => {}
-                            LogEntry::Accepted(_, _) => {}
-                            LogEntry::Committed(_, chosen_value) => {
-                                assert_eq!(value, *chosen_value);
-                            }
-                        }
-                        *entry = LogEntry::Committed(proposal_id, value);
+                        self.common.commit_value(slot, value);
                         vec![]
                     }
                     // we are no longer a leader, we can't do anything about these
@@ -427,13 +414,12 @@ impl MultiPaxos {
             .enumerate()
             .filter_map(|(i, entry)| {
                 let slot = first_unchosen + i;
-                match entry {
-                    LogEntry::Empty => None,
-                    LogEntry::Accepted(proposal_id, value)
-                    | LogEntry::Committed(proposal_id, value) => {
-                        Some((slot, (*proposal_id, value.clone())))
-                    }
-                }
+                let x = match entry {
+                    LogEntry::Empty => return None,
+                    LogEntry::Accepted(proposal_id, value) => (Some(*proposal_id), value.clone()),
+                    LogEntry::Committed(value) => (None, value.clone()),
+                };
+                Some((slot, x))
             })
             .collect()
     }
@@ -494,28 +480,49 @@ impl Leader {
             .into_values()
             .flatten()
             .into_grouping_map()
-            .max_by_key(|_slot, (proposal_id, _val)| *proposal_id);
+            .max_by_key(|_slot, (proposal_id, _val)| {
+                // silly hack: we want to take the largest proposal value, but None should
+                // rank *higher* than any Some, not lower!
+                // reversing the final result puts None at the top, but prefers lower
+                // proposals, so we apply an inner Reverse as well
+                std::cmp::Reverse(proposal_id.map(std::cmp::Reverse))
+            });
 
         // now fill all our gaps until we've used up all the values we
         // need to propagate
         assert_eq!(self.uncommitted_slots, HashMap::new());
-        let mut accept_msgs = vec![];
+        let mut messages = vec![];
         for slot in self.first_unchosen.. {
             if values.is_empty() {
                 break;
             }
 
-            let value = match values.remove(&slot) {
-                Some((_old_proposal_id, value)) => value,
-                None => String::from("NO-OP"),
+            // what did we find out about this slot?
+            let msgs = match values.remove(&slot) {
+                // nothing; no quorum has accepted any value yet, propose a no-op value
+                None => self.start_accept_phase(
+                    common,
+                    current_proposal_id,
+                    slot,
+                    String::from("NO-OP"),
+                ),
+                // someone's accepted a value but it's not confirmed,
+                // start an Accept round for it
+                Some((Some(_), value)) => {
+                    self.start_accept_phase(common, current_proposal_id, slot, value.clone())
+                }
+                // this value has been committed by someone, tell everyone
+                // to learn it
+                Some((None, value)) => {
+                    common.commit_value(slot, value.clone());
+                    common.msg_everybody_else(Message::Learned(n, slot, value))
+                }
             };
 
-            // send an accept to self, and to others
-            let msgs = self.start_accept_phase(common, current_proposal_id, slot, value.clone());
-            accept_msgs.extend(msgs);
+            messages.extend(msgs);
         }
 
-        accept_msgs
+        messages
     }
 
     fn handle_accepted(
@@ -559,7 +566,7 @@ impl Leader {
             .log
             .get_mut(slot)
             .expect("self-accept should've initialized this one") =
-            LogEntry::Committed(current_proposal_id, value.clone());
+            LogEntry::Committed(value.clone());
 
         common.msg_everybody_else(Message::Learned(n, slot, value))
     }
@@ -628,5 +635,19 @@ impl Common {
                 }
             })
             .collect()
+    }
+
+    fn commit_value(&mut self, slot: usize, value: String) {
+        // unconditional accept
+        let entry = get_mut_extending_if_necessary(&mut self.log, slot, || LogEntry::Empty);
+        // sanity check
+        match entry {
+            LogEntry::Empty => {}
+            LogEntry::Accepted(_, _) => {}
+            LogEntry::Committed(chosen_value) => {
+                assert_eq!(value, *chosen_value);
+            }
+        }
+        *entry = LogEntry::Committed(value);
     }
 }
