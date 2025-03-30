@@ -1,4 +1,3 @@
-use std::ops::ControlFlow;
 
 use network::NetworkSettings;
 use rand::distr::Uniform;
@@ -91,32 +90,10 @@ impl<P: Process> Simulation<P> {
         }
     }
 
-    pub fn tick(&mut self, enforce_quorum: bool) -> ControlFlow<(), ()> {
+    pub fn tick(&mut self) {
         self.clock += 1;
         log::trace!("==== TICK {:04} ====", self.clock);
         log::trace!("{} messages pending...", self.network.len());
-
-        // Are we done?
-        if self.state.iter().all(|p| p.process.is_done()) {
-            log::trace!("Everyone has decided on a value!");
-            return ControlFlow::Break(());
-        }
-
-        // Randomly crash and uncrash
-        for idx in 0..self.state.len() {
-            let down = self.state[idx].is_down;
-            if !down && self.rng.random_bool(CRASH_PROBABILITY) {
-                let live_count = self.state.iter().filter(|p| !p.is_down).count();
-                if !enforce_quorum || live_count > QUORUM {
-                    log::trace!("Process {} is crashing!", idx);
-                    self.state[idx].is_down = true;
-                }
-            } else if down && self.rng.random_bool(UNCRASH_PROBABILITY) {
-                log::trace!("Process {} is back up!", idx);
-                self.state[idx].is_down = false;
-                self.state[idx].process.restore_from_crash(self.clock);
-            }
-        }
 
         // Fetch messages
         let mut msgs_to_deliver: [_; N] = std::array::from_fn(|_| vec![]);
@@ -152,17 +129,32 @@ impl<P: Process> Simulation<P> {
             );
         }
         log::trace!("====================");
-
-        ControlFlow::Continue(())
     }
 
     pub fn run(&mut self) -> Consensus {
         for t in 0..MAX_TICKS {
-            let enforce_quorum = t > LIVELOCK_MODE_THRESHOLD;
-            match self.tick(enforce_quorum) {
-                ControlFlow::Continue(_) => {}
-                ControlFlow::Break(_) => break,
+            // Are we done?
+            if self.state.iter().all(|p| p.process.is_done()) {
+                log::trace!("Everyone has decided on a value!");
+                break;
             }
+
+            // Randomly crash and uncrash
+            let enforce_quorum = t > LIVELOCK_MODE_THRESHOLD;
+            for idx in 0..self.state.len() {
+                let down = self.state[idx].is_down;
+                if !down && self.rng.random_bool(CRASH_PROBABILITY) {
+                    let live_count = self.state.iter().filter(|p| !p.is_down).count();
+                    if !enforce_quorum || live_count > QUORUM {
+                        self.crash(idx);
+                    }
+                } else if down && self.rng.random_bool(UNCRASH_PROBABILITY) {
+                    self.uncrash(idx);
+                }
+            }
+
+            // Tick once
+            self.tick();
         }
 
         log::trace!("======== END OF SIMULATION ========");
@@ -174,9 +166,20 @@ impl<P: Process> Simulation<P> {
             )
         }
 
-        // Check whether all processes are in a consistent state. It's okay
-        // for some to have decided on a value and others not, but we can't
-        // have two processes deciding on two different values.
+        self.check_consensus()
+    }
+
+    pub fn stats(&self) -> Stats {
+        Stats {
+            ticks_elapsed: self.clock,
+            num_messages_sent: self.network.num_messages_sent(),
+        }
+    }
+
+    /// Check whether all processes are in a consistent state. It's okay
+    /// for some to have decided on a value and others not, but we can't
+    /// have two processes deciding on two different values.
+    pub fn check_consensus(&self) -> Consensus {
         let values: Vec<_> = self
             .state
             .iter()
@@ -201,11 +204,15 @@ impl<P: Process> Simulation<P> {
         }
     }
 
-    pub fn stats(&self) -> Stats {
-        Stats {
-            ticks_elapsed: self.clock,
-            num_messages_sent: self.network.num_messages_sent(),
-        }
+    pub fn crash(&mut self, idx: usize) {
+        log::trace!("Process {} is crashing!", idx);
+        self.state[idx].is_down = true;
+    }
+
+    pub fn uncrash(&mut self, idx: usize) {
+        log::trace!("Process {} is back up!", idx);
+        self.state[idx].is_down = false;
+        self.state[idx].process.restore_from_crash(self.clock);
     }
 }
 
