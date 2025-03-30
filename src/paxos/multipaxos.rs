@@ -44,7 +44,7 @@ enum Phase {
 #[derive(Debug)]
 // TODO: split into phase 1 and phase 2?
 struct Leader {
-    first_unchosen: usize,
+    unchosen_gaps: Gaps,
     promises_received: HashMap<ProcessID, PreviouslyAccepted>,
     uncommitted_slots: HashMap<usize, (String, HashSet<ProcessID>)>,
     next_heartbeat_time: u64,
@@ -59,13 +59,19 @@ struct Follower {
 
 #[derive(Debug, Clone)]
 pub enum Message {
-    Prepare(usize, usize),
+    Prepare(usize, Gaps),
     Promise(usize, PreviouslyAccepted),
     Accept(usize, usize, String),
     Accepted(usize, usize),
     Learned(usize, usize, String), // TODO: don't need proposal number?
     Nack(ProposalID),
     Heartbeat,
+}
+
+#[derive(Debug, Clone)]
+pub struct Gaps {
+    interior: Vec<usize>,
+    tail_start: usize,
 }
 
 // None for proposal id indicates committed
@@ -226,21 +232,16 @@ impl MultiPaxos {
         let n = latest.map_or(0, |x| x + 1);
         self.common.last_issued_proposal = Some(n);
 
-        // find the index of our first uncommitted entry
-        let first_unchosen = self
-            .common
-            .log
-            .iter()
-            .take_while(|entry| matches!(entry, LogEntry::Committed(_)))
-            .count();
+        // find all uncommitted entries
+        let unchosen_gaps = self.common.find_gaps();
 
         // simulate receiving a prepare from yourself
-        let promise_from_self = self.get_previously_accepted(first_unchosen);
+        let promise_from_self = self.get_previously_accepted(&unchosen_gaps);
         self.common.latest_promised = Some(ProposalID(n, self.common.id));
 
         // set as leader
         self.phase = Phase::Leader(Leader {
-            first_unchosen,
+            unchosen_gaps: unchosen_gaps.clone(),
             promises_received: HashMap::from([(self.common.id, promise_from_self)]),
             next_heartbeat_time: current_tick + HEARTBEAT_INTERVAL,
             uncommitted_slots: HashMap::new(),
@@ -248,7 +249,7 @@ impl MultiPaxos {
             value_counter: 0,
         });
 
-        Message::Prepare(n, first_unchosen)
+        Message::Prepare(n, unchosen_gaps)
     }
 
     fn recv_message(
@@ -313,14 +314,14 @@ impl MultiPaxos {
                 follower.min_next_proposal_time = current_tick + PROPOSAL_COOLDOWN;
                 match msg.msg {
                     // messages we expect
-                    Message::Prepare(n, first_unchosen) => {
+                    Message::Prepare(n, unchosen_gaps) => {
                         // check if this is newer than our current proposal
                         let reply = match follower
                             .make_promise_unless_obsolete(&mut self.common, ProposalID(n, msg.from))
                         {
                             // reply with all the entries that the leader requested
                             Ok(()) => {
-                                Message::Promise(n, self.get_previously_accepted(first_unchosen))
+                                Message::Promise(n, self.get_previously_accepted(&unchosen_gaps))
                             }
                             // NACK it
                             Err(latest_promised) => {
@@ -404,16 +405,15 @@ impl MultiPaxos {
         }
     }
 
-    fn get_previously_accepted(&self, first_unchosen: usize) -> PreviouslyAccepted {
-        // Rust's convention is to return None if the range is out-of-bounds, but we
-        // want an empty slice instead.
-        let tail_slice = self.common.log.get(first_unchosen..).unwrap_or(&[]);
-
-        tail_slice
+    fn get_previously_accepted(&self, unchosen_gaps: &Gaps) -> PreviouslyAccepted {
+        // WARNING: this is an infinite iterator! map_while makes it finite
+        unchosen_gaps
             .iter()
-            .enumerate()
-            .filter_map(|(i, entry)| {
-                let slot = first_unchosen + i;
+            .map_while(|slot| {
+                let entry = self.common.log.get(slot)?;
+                Some((slot, entry))
+            })
+            .filter_map(|(slot, entry)| {
                 let x = match entry {
                     LogEntry::Empty => return None,
                     LogEntry::Accepted(proposal_id, value) => (Some(*proposal_id), value.clone()),
@@ -492,7 +492,7 @@ impl Leader {
         // need to propagate
         assert_eq!(self.uncommitted_slots, HashMap::new());
         let mut messages = vec![];
-        for slot in self.first_unchosen.. {
+        for slot in self.unchosen_gaps.clone().iter() {
             if values.is_empty() {
                 break;
             }
@@ -637,6 +637,26 @@ impl Common {
             .collect()
     }
 
+    /// Returns a [Gaps] representing the set of uncommitted entries in the log.
+    fn find_gaps(&self) -> Gaps {
+        let interior = self
+            .log
+            .iter()
+            .enumerate()
+            .filter_map(|(slot, entry)| match entry {
+                LogEntry::Empty | LogEntry::Accepted(_, _) => Some(slot),
+                LogEntry::Committed(_) => None,
+            })
+            .collect();
+
+        // TODO: contract?
+
+        Gaps {
+            interior,
+            tail_start: self.log.len(),
+        }
+    }
+
     fn commit_value(&mut self, slot: usize, value: String) {
         // unconditional accept
         let entry = get_mut_extending_if_necessary(&mut self.log, slot, || LogEntry::Empty);
@@ -649,5 +669,11 @@ impl Common {
             }
         }
         *entry = LogEntry::Committed(value);
+    }
+}
+
+impl Gaps {
+    fn iter(&self) -> impl Iterator<Item = usize> + use<'_> {
+        self.interior.iter().cloned().chain(self.tail_start..)
     }
 }
