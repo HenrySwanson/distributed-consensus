@@ -67,6 +67,7 @@ pub enum Message {
     Learned(usize, usize, String), // TODO: don't need proposal number?
     Nack(ProposalID),
     Heartbeat,
+    Request(usize),
 }
 
 #[derive(Debug, Clone)]
@@ -295,6 +296,18 @@ impl MultiPaxos {
 
                         vec![]
                     }
+                    Message::Request(slot) => {
+                        // if we know this one, regardless of anything else going on, tell them what
+                        // the value is
+                        if let Some(LogEntry::Committed(value)) = self.common.log.get(slot) {
+                            vec![Outgoing {
+                                to: msg.from,
+                                msg: Message::Learned(current_n, slot, value.clone()),
+                            }]
+                        } else {
+                            vec![]
+                        }
+                    }
 
                     // messages that might knock us out of leadership
                     Message::Prepare(n, _)
@@ -327,28 +340,40 @@ impl MultiPaxos {
                     // messages we expect
                     Message::Prepare(n, unchosen_gaps) => {
                         // check if this is newer than our current proposal
-                        let reply = match follower
+                        let replies = match follower
                             .make_promise_unless_obsolete(&mut self.common, ProposalID(n, msg.from))
                         {
                             // reply with all the entries that the leader requested
                             Ok(()) => {
-                                Message::Promise(n, self.get_previously_accepted(&unchosen_gaps))
+                                let mut replies = vec![];
+                                replies.push(Message::Promise(
+                                    n,
+                                    self.get_previously_accepted(&unchosen_gaps),
+                                ));
+                                replies.extend(
+                                    self.get_missing_entries(unchosen_gaps)
+                                        .map(Message::Request),
+                                );
+                                replies
                             }
                             // NACK it
                             Err(latest_promised) => {
                                 if ENABLE_NACKS {
-                                    Message::Nack(latest_promised)
+                                    vec![Message::Nack(latest_promised)]
                                 } else {
-                                    return vec![];
+                                    vec![]
                                 }
                             }
                         };
 
                         // TODO: reply() method
-                        vec![Outgoing {
-                            to: msg.from,
-                            msg: reply,
-                        }]
+                        replies
+                            .into_iter()
+                            .map(|reply| Outgoing {
+                                to: msg.from,
+                                msg: reply,
+                            })
+                            .collect()
                     }
                     Message::Accept(n, slot, value) => {
                         let proposal_id = ProposalID(n, msg.from);
@@ -381,6 +406,23 @@ impl MultiPaxos {
                         self.common.log.commit_value(slot, value);
                         vec![]
                     }
+
+                    // we're not longer a leader, but we can react to this one
+                    Message::Request(slot) => {
+                        // if we know this one, regardless of anything else going on, tell them what
+                        // the value is
+                        if let Some(LogEntry::Committed(value)) = self.common.log.get(slot) {
+                            vec![Outgoing {
+                                to: msg.from,
+                                // TODO: 0 is a dummy value here, should probably do something
+                                // better here
+                                msg: Message::Learned(0, slot, value.clone()),
+                            }]
+                        } else {
+                            vec![]
+                        }
+                    }
+
                     // we are no longer a leader, we can't do anything about these
                     Message::Promise(_, _) | Message::Accepted(_, _) | Message::Nack(_) => {
                         vec![]
@@ -413,6 +455,23 @@ impl MultiPaxos {
                 Some((slot, x))
             })
             .collect()
+    }
+
+    fn get_missing_entries(&self, unchosen_gaps: Gaps) -> impl Iterator<Item = usize> + use<'_> {
+        self.common
+            .log
+            .iter()
+            .enumerate()
+            .filter(move |(slot, entry)| match entry {
+                LogEntry::Empty | LogEntry::Accepted(_, _) => {
+                    // do we think the leader knows it? otherwise, why ask?
+                    let unchosen =
+                        unchosen_gaps.interior.contains(slot) || unchosen_gaps.tail_start <= *slot;
+                    !unchosen
+                }
+                LogEntry::Committed(_) => false,
+            })
+            .map(|(slot, _)| slot)
     }
 }
 
