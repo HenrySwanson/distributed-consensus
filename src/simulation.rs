@@ -61,7 +61,6 @@ impl<P: Process> Simulation<P> {
             network: Network::new(
                 // TODO: okay to use StdRng for parent and child?
                 StdRng::from_rng(&mut rng),
-                // TOOD: take this from constructor as well
                 network_settings,
             ),
             rng,

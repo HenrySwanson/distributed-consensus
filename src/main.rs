@@ -7,9 +7,11 @@ use clap::Parser;
 use paxos::MultiPaxos;
 use paxos::NaiveMultiPaxos;
 use paxos::SingleDecree;
+use scenario::easy_scenario;
 use scenario::everything_scenario;
 use simulation::Consensus;
 use simulation::Process;
+use simulation::Simulation;
 use simulation::Stats;
 
 mod paxos;
@@ -46,15 +48,25 @@ struct Args {
     /// Runs repeatedly until failure
     #[arg(long)]
     stress: bool,
+    /// Which algorithm to test
     #[arg(long)]
     algorithm: Option<Algorithm>,
+    /// Which scenario to run
+    #[arg(long)]
+    scenario: Option<Scenario>,
 }
 
-#[derive(Debug, Clone, clap::ValueEnum)]
+#[derive(Debug, Clone, Copy, clap::ValueEnum)]
 enum Algorithm {
     SingleDecree,
     NaiveMulti,
     Multi,
+}
+
+#[derive(Debug, Clone, Copy, clap::ValueEnum)]
+enum Scenario {
+    Easy,
+    Everything,
 }
 
 fn main() {
@@ -72,24 +84,30 @@ fn main() {
         .unwrap();
 
     let algorithm = args.algorithm.unwrap_or(Algorithm::Multi);
+    let scenario = args.scenario.unwrap_or(Scenario::Everything);
 
-    if args.stress {
-        match algorithm {
-            Algorithm::SingleDecree => stress_test::<SingleDecree>(),
-            Algorithm::NaiveMulti => stress_test::<NaiveMultiPaxos>(),
-            Algorithm::Multi => stress_test::<MultiPaxos>(),
-        }
-    } else {
-        let seed = args.seed.unwrap_or_else(rand::random);
-        match algorithm {
-            Algorithm::SingleDecree => run_once::<SingleDecree>(seed),
-            Algorithm::NaiveMulti => run_once::<NaiveMultiPaxos>(seed),
-            Algorithm::Multi => run_once::<MultiPaxos>(seed),
-        }
+    // TODO: seems like there should be a better way to do this
+    match algorithm {
+        Algorithm::SingleDecree => do_test::<SingleDecree>(args.seed, args.stress, scenario),
+        Algorithm::NaiveMulti => do_test::<NaiveMultiPaxos>(args.seed, args.stress, scenario),
+        Algorithm::Multi => do_test::<MultiPaxos>(args.seed, args.stress, scenario),
     }
 }
 
-fn stress_test<P>()
+fn do_test<P>(seed: Option<u64>, stress: bool, scenario: Scenario)
+where
+    P: Process + UnwindSafe,
+    P::Message: UnwindSafe,
+{
+    if stress {
+        stress_test::<P>(scenario)
+    } else {
+        let seed = seed.unwrap_or_else(rand::random);
+        run_once::<P>(seed, scenario)
+    }
+}
+
+fn stress_test<P>(scenario: Scenario)
 where
     P: Process + UnwindSafe,
     P::Message: UnwindSafe,
@@ -105,7 +123,7 @@ where
     for n in 0..u64::MAX {
         let seed = rand::random();
 
-        let sim = match std::panic::catch_unwind(|| everything_scenario::<P>(seed)) {
+        let sim = match std::panic::catch_unwind(|| get_scenario::<P>(seed, scenario)) {
             Ok(x) => x,
             Err(panic) => {
                 // log the failing seed and then resume unwinding
@@ -150,11 +168,11 @@ where
     )
 }
 
-fn run_once<P>(seed: u64)
+fn run_once<P>(seed: u64, scenario: Scenario)
 where
     P: Process,
 {
-    let sim = everything_scenario::<P>(seed);
+    let sim: Simulation<P> = get_scenario(seed, scenario);
 
     log::info!("Seed was: {seed}");
     if let Consensus::Complete = sim.check_consensus() {
@@ -163,6 +181,16 @@ where
     }
 
     println!("{:?}", sim.stats());
+}
+
+fn get_scenario<P>(seed: u64, scenario: Scenario) -> Simulation<P>
+where
+    P: Process,
+{
+    match scenario {
+        Scenario::Easy => easy_scenario(seed),
+        Scenario::Everything => everything_scenario(seed),
+    }
 }
 
 fn configure_ctrlc_handler() -> Arc<AtomicBool> {

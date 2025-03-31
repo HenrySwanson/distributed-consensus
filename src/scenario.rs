@@ -20,6 +20,43 @@ const REPLAY_PROBABILITY: f64 = 0.05;
 const MIN_NETWORK_DELAY: u64 = 3;
 const MAX_NETWORK_DELAY: u64 = 10;
 
+/// Nothing bad happens; no one crashes, no partitions, not even packet duplication.
+pub fn easy_scenario<P: Process>(seed: u64) -> Simulation<P> {
+    // Generate the master RNG
+    let mut master_rng = StdRng::seed_from_u64(seed);
+    let mut sim = Simulation::<P>::new(
+        StdRng::from_rng(&mut master_rng),
+        NetworkSettings {
+            loss_probability: 0.0,
+            replay_probability: 0.0,
+            delay_distribution: Uniform::new_inclusive(MIN_NETWORK_DELAY, MAX_NETWORK_DELAY)
+                .expect("range error"),
+        },
+    );
+
+    for _ in 0..MAX_TICKS {
+        // Are we done?
+        if sim.processes().iter().all(|p| p.process.is_done()) {
+            log::trace!("Everyone has decided on a value!");
+            break;
+        }
+
+        // Tick once
+        sim.tick();
+    }
+
+    log::trace!("======== END OF SIMULATION ========");
+    for (i, p) in sim.processes().iter().enumerate() {
+        log::trace!(
+            "Process {} has decided on value {:?}",
+            i,
+            p.process.decided_value()
+        )
+    }
+
+    sim
+}
+
 /// Throws a little bit of everything at the processes: crashes, packet loss,
 /// packet duplication, you name it.
 pub fn everything_scenario<P: Process>(seed: u64) -> Simulation<P> {
