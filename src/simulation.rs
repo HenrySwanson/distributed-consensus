@@ -75,6 +75,10 @@ impl<P: Process> Simulation<P> {
         &self.state
     }
 
+    pub fn network_mut(&mut self) -> &mut Network<P::Message> {
+        &mut self.network
+    }
+
     pub fn tick(&mut self) {
         self.clock += 1;
         log::trace!("==== TICK {:04} ====", self.clock);

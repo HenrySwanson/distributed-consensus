@@ -5,6 +5,7 @@ use rand::SeedableRng;
 
 use crate::simulation::NetworkSettings;
 use crate::simulation::Process;
+use crate::simulation::ProcessID;
 use crate::simulation::Simulation;
 use crate::N;
 use crate::QUORUM;
@@ -14,6 +15,9 @@ const MAX_TICKS: u64 = 10000;
 const LIVELOCK_MODE_THRESHOLD: u64 = MAX_TICKS * 4 / 5;
 const CRASH_PROBABILITY: f64 = 0.05;
 const UNCRASH_PROBABILITY: f64 = 0.2;
+const PARTITION_PROBABILITY: f64 = 0.02;
+const MIN_PARTITION_TIME: u64 = 100;
+const MAX_PARTITION_TIME: u64 = 1000;
 
 const LOSS_PROBABILITY: f64 = 0.05;
 const REPLAY_PROBABILITY: f64 = 0.05;
@@ -72,6 +76,8 @@ pub fn everything_scenario<P: Process>(seed: u64) -> Simulation<P> {
         },
     );
 
+    let mut partition_end_time = None;
+
     for t in 0..MAX_TICKS {
         // Are we done?
         if sim.processes().iter().all(|p| p.process.is_done()) {
@@ -91,6 +97,28 @@ pub fn everything_scenario<P: Process>(seed: u64) -> Simulation<P> {
             } else if down && master_rng.random_bool(UNCRASH_PROBABILITY) {
                 sim.uncrash(idx);
             }
+        }
+
+        // Occasionally apply a partition
+        if t <= LIVELOCK_MODE_THRESHOLD
+            && partition_end_time.is_none()
+            && master_rng.random_bool(PARTITION_PROBABILITY)
+        {
+            partition_end_time = Some(
+                master_rng
+                    .random_range(MIN_PARTITION_TIME..=MAX_PARTITION_TIME)
+                    .min(LIVELOCK_MODE_THRESHOLD),
+            );
+            sim.network_mut().create_partition(
+                (0..N)
+                    .filter(|_| master_rng.random_bool(0.5))
+                    .map(ProcessID),
+            );
+        }
+
+        // Clear the partition if we're supposed to
+        if partition_end_time.is_some_and(|end| t >= end) {
+            sim.network_mut().clear_partition()
         }
 
         // Tick once

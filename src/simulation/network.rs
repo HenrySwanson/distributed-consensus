@@ -1,5 +1,6 @@
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
+use std::collections::HashSet;
 
 use all_asserts::assert_range;
 use rand::distr::Distribution;
@@ -12,6 +13,8 @@ use super::ProcessID;
 #[derive(Debug)]
 pub struct Network<M> {
     in_flight: BinaryHeap<Reverse<Packet<M>>>,
+    partition: HashSet<ProcessID>, // inside and outside of set can't communicate
+    // TODO: partial partitions? more-than-binary partitions?
     rng: StdRng,
     settings: NetworkSettings,
     num_messages_sent: u64,
@@ -71,6 +74,7 @@ impl<M> Network<M> {
 
         Self {
             in_flight: BinaryHeap::new(),
+            partition: HashSet::new(),
             rng,
             settings,
             num_messages_sent: 0,
@@ -87,19 +91,24 @@ impl<M> Network<M> {
         }
 
         self.in_flight
-            .extend(msgs.into_iter().filter_map(|out_msg| {
+            .extend(msgs.into_iter().filter_map(|Outgoing { to, msg }| {
                 // Q: do this at pop time or enqueue time?
                 if self.rng.random_bool(self.settings.loss_probability) {
-                    log::trace!("Dropping message {:?}", out_msg.msg);
+                    log::trace!("Dropping message {:?}", msg);
+                    return None;
+                }
+
+                if self.partition.contains(&from) != self.partition.contains(&to) {
+                    log::trace!("Message {:?} blocked by partition", msg);
                     return None;
                 }
 
                 let delay = self.settings.delay_distribution.sample(&mut self.rng);
                 Some(Reverse(Packet {
                     arrival_time: current_tick + delay,
-                    msg: out_msg.msg,
+                    msg,
                     from,
-                    to: out_msg.to,
+                    to,
                 }))
             }));
     }
@@ -145,6 +154,14 @@ impl<M> Network<M> {
 
     pub fn num_messages_sent(&self) -> u64 {
         self.num_messages_sent
+    }
+
+    pub fn create_partition(&mut self, nodes: impl IntoIterator<Item = ProcessID>) {
+        self.partition = nodes.into_iter().collect()
+    }
+
+    pub fn clear_partition(&mut self) {
+        self.partition.clear()
     }
 }
 
